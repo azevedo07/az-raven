@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "raven-studio-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "raven-studio", "run", "dev"],
+      "port": 3000
+    }
+  ]
+}
