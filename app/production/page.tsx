@@ -2,9 +2,10 @@ import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import ProgressBar from "@/components/ui/ProgressBar";
 import PipelineStep from "@/components/PipelineStep";
-import { pipelineModules } from "@/lib/data";
+import { getPipelineModules } from "@/lib/data";
 
-export default function ProducaoPage() {
+export default async function ProducaoPage() {
+  const pipelineModules = await getPipelineModules();
   const doneCount = pipelineModules.filter((m) => m.status === "done").length;
 
   return (

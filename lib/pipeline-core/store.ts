@@ -1,24 +1,33 @@
-import { PipelineEngine } from "./engine";
+import { getPipelineState } from "../pipeline-service/pipelineService";
 import { moduleRegistry } from "./registry";
 import { ExecutionStatus, ModuleId } from "./types";
 import { PipelineModule, PipelineStatus } from "../types";
 
 /**
- * Camada de estado do Pipeline Core: instancia e conduz o `PipelineEngine`
- * do projeto de demonstração e traduz seu estado para o formato
- * `PipelineModule[]` já consumido por `components/PipelineStep.tsx` e
- * `app/production/page.tsx`.
+ * Adaptador do lado do servidor para a UI existente (`lib/data.ts` →
+ * `components/PipelineStep.tsx`, `app/production/page.tsx`).
  *
- * `status` e `pct` vêm sempre do `PipelineEngine` — nunca são inventados
- * aqui. `description`/`eta` ainda são conteúdo de apresentação estático
- * por módulo, a mesma informação hoje hardcoded em `lib/data.ts`, porque a
- * Sprint 1.1 cobre apenas o motor de execução, não a geração real de
- * conteúdo por IA (isso é integração futura).
+ * Decisão arquitetural (Sprint 1.2, revisão da Task 3): este arquivo
+ * consome o Pipeline Service **diretamente**, por chamada de função —
+ * não via HTTP. A API (`app/api/pipeline`) continua existindo, mas como
+ * a única interface para consumidores externos (browser, mobile,
+ * integrações futuras); um Server Component chamando sua própria rota
+ * via `fetch` é um round-trip de rede desnecessário que o próprio
+ * Next.js App Router desaconselha.
  *
- * Persistência real (sobreviver a um restart do processo) é a Sprint 1.3
- * — ver `docs/ROADMAP.md`. Por ora, cada engine vive em memória durante o
- * tempo de vida do processo, na mesma premissa que os arrays mockados que
- * este módulo substitui.
+ *   UI (app/, components/) → lib/data.ts → store.ts (este arquivo) → Pipeline Service → Pipeline Engine → Registry
+ *   Consumidor externo (browser/mobile/integração) → API → Pipeline Service → Pipeline Engine → Registry
+ *
+ * Regra do projeto: componentes de UI (`app/`, `components/`) nunca
+ * importam Pipeline Service, Pipeline Engine ou Registry — só este
+ * adaptador tem essa permissão.
+ *
+ * O que este arquivo faz é só tradução para a UI: pega o estado de
+ * execução real (`status`/`pct`) do Service e o combina com metadado
+ * estático do `registry` (`title`/ordem) e com conteúdo de apresentação
+ * ainda fixo por módulo (`description`/`eta` — a mesma informação hoje
+ * hardcoded, porque a Sprint 1.1/1.2 cobrem o motor de execução e a API,
+ * não a geração real de conteúdo por IA).
  */
 
 interface ModuleContent {
@@ -43,22 +52,6 @@ const O_CORVO_CONTENT: Record<ModuleId, ModuleContent> = {
 };
 
 /**
- * Módulos já concluídos no projeto de demonstração, na ordem exigida pela
- * cadeia linear do registry (cada um só termina depois do anterior).
- * `production` fica de fora de propósito: é o módulo em andamento.
- */
-const O_CORVO_DONE_MODULES: ModuleId[] = [
-  "literary-director",
-  "emotion-engine",
-  "character-engine",
-  "world-builder",
-  "storyboard",
-  "director-engine",
-  "prompt-builder",
-  "assets",
-];
-
-/**
  * Traduz o status interno do engine (`ExecutionStatus`) para o vocabulário
  * que a UI já entende (`PipelineStatus`, sem o estado "error").
  */
@@ -71,31 +64,26 @@ const EXECUTION_TO_UI_STATUS: Record<ExecutionStatus, PipelineStatus> = {
   error: "pending",
 };
 
-function createOCorvoEngine(): PipelineEngine {
-  const engine = new PipelineEngine("o-corvo");
-  engine.startProject();
-
-  for (const moduleId of O_CORVO_DONE_MODULES) {
-    if (engine.getState().modules[moduleId].status === "pending") {
-      engine.startModule(moduleId);
-    }
-    engine.finishModule(moduleId);
-  }
-
-  engine.startModule("production");
-
-  return engine;
-}
-
-const oCorvoEngine = createOCorvoEngine();
+const O_CORVO_PROJECT_ID = "o-corvo";
 
 /**
  * Estado atual do pipeline do projeto de demonstração no formato
  * consumido pela UI. Chamar isto sempre que a UI precisar do estado mais
  * recente — não cacheie o retorno além do ciclo de renderização atual.
+ *
+ * Lê o estado de execução direto do Pipeline Service (nunca do Engine)
+ * e o combina com `title`/ordem do `registry` — leitura de metadado
+ * estático, não lógica de negócio. Continua `async` (embora a chamada em
+ * si seja síncrona hoje) para não exigir mudanças em `lib/data.ts` nem em
+ * `app/production/page.tsx`, e para já comportar operações do Service
+ * que se tornem assíncronas no futuro (ex.: persistência da Sprint 1.3).
  */
-export function getPipelineModules(): PipelineModule[] {
-  const state = oCorvoEngine.getState();
+export async function getPipelineModules(): Promise<PipelineModule[]> {
+  const state = getPipelineState(O_CORVO_PROJECT_ID);
+  if (!state) {
+    return [];
+  }
+
   return moduleRegistry.map((definition) => {
     const executionState = state.modules[definition.id];
     const content = O_CORVO_CONTENT[definition.id];

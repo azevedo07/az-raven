@@ -1,11 +1,11 @@
 import {
   Project,
   Scene,
-  PipelineModule,
   QualityCategory,
   PlatformStrategy,
 } from "./types";
-import { getPipelineModules } from "./pipeline-core/store";
+
+export { getPipelineModules } from "./pipeline-core/store";
 
 /**
  * Camada de dados do Raven Studio.
@@ -250,10 +250,9 @@ export const worldBible = [
   { label: "Referências cinematográficas", value: "Sleepy Hollow, The Others, Crimson Peak" },
 ];
 
-// Estado real do Pipeline Core (lib/pipeline-core), não mais um array
-// hardcoded — status e progresso vêm do PipelineEngine; ver
-// lib/pipeline-core/store.ts.
-export const pipelineModules: PipelineModule[] = getPipelineModules();
+// getPipelineModules (re-exportado acima) busca o estado real do
+// Pipeline Core através da API interna (app/api/pipeline) — não é mais
+// um array nem uma leitura direta do engine; ver lib/pipeline-core/store.ts.
 
 export const promptCategories: { key: string; label: string; code: string }[] = [
   {
