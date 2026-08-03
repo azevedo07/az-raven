@@ -1,4 +1,4 @@
-import { getPipelineState } from "../pipeline-service/pipelineService";
+import { pipelineService } from "../application/container";
 import { moduleRegistry } from "./registry";
 import { ExecutionStatus, ModuleId } from "./types";
 import { PipelineModule, PipelineStatus } from "../types";
@@ -71,15 +71,12 @@ const O_CORVO_PROJECT_ID = "o-corvo";
  * consumido pela UI. Chamar isto sempre que a UI precisar do estado mais
  * recente — não cacheie o retorno além do ciclo de renderização atual.
  *
- * Lê o estado de execução direto do Pipeline Service (nunca do Engine)
- * e o combina com `title`/ordem do `registry` — leitura de metadado
- * estático, não lógica de negócio. Continua `async` (embora a chamada em
- * si seja síncrona hoje) para não exigir mudanças em `lib/data.ts` nem em
- * `app/production/page.tsx`, e para já comportar operações do Service
- * que se tornem assíncronas no futuro (ex.: persistência da Sprint 1.3).
+ * Lê o estado de execução direto do Pipeline Service (nunca do Engine
+ * ou do Repository) e o combina com `title`/ordem do `registry` —
+ * leitura de metadado estático, não lógica de negócio.
  */
 export async function getPipelineModules(): Promise<PipelineModule[]> {
-  const state = getPipelineState(O_CORVO_PROJECT_ID);
+  const state = await pipelineService.getPipelineState(O_CORVO_PROJECT_ID);
   if (!state) {
     return [];
   }

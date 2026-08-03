@@ -2,7 +2,8 @@ import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import ProgressBar from "@/components/ui/ProgressBar";
 import PipelineStep from "@/components/PipelineStep";
-import { getPipelineModules } from "@/lib/data";
+import PipelinePanels from "@/components/PipelinePanels";
+import { getPipelineModules } from "@/lib/pipeline-core/store";
 
 export default async function ProducaoPage() {
   const pipelineModules = await getPipelineModules();
@@ -35,6 +36,8 @@ export default async function ProducaoPage() {
           <PipelineStep key={m.title} module={m} isLast={i === pipelineModules.length - 1} />
         ))}
       </Card>
+
+      <PipelinePanels projectId="o-corvo" />
     </div>
   );
 }

@@ -1,0 +1,292 @@
+// Pipeline Core — camada de persistência (Sprint 1.3).
+//
+// Prisma 7 mudou o modelo de configuração: a URL de conexão não fica
+// mais aqui (isso agora é responsabilidade de prisma.config.ts, na raiz
+// do projeto, e do driver adapter passado ao PrismaClient em runtime).
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+// -----------------------------------------------------------------------
+// Enums
+// -----------------------------------------------------------------------
+
+/// Espelha ProjectPipelineStatus (lib/pipeline-core/types.ts). Fechado e
+/// controlado inteiramente pelo PipelineEngine — faz sentido como enum
+/// de banco.
+enum ProjectPipelineStatus {
+  idle
+  running
+  paused
+  cancelled
+  completed
+
+  @@map("project_pipeline_status")
+}
+
+/// Espelha ExecutionStatus (lib/pipeline-core/types.ts).
+enum ModuleExecutionStatus {
+  pending
+  active
+  done
+  error
+
+  @@map("module_execution_status")
+}
+
+/// Espelha AssetStatus (lib/assets/types.ts) — Sprint 1.7. Ciclo de vida
+/// de upload/armazenamento de um arquivo, não do pipeline de produção;
+/// não tem nenhuma relação com ProjectPipelineStatus/ModuleExecutionStatus
+/// acima. Enum de banco porque, ao contrário de `Asset.type` (ver
+/// comentário no model), este é um conjunto genérico e realmente fechado
+/// — qualquer sistema de upload tem essencialmente estes 5 estados.
+enum AssetStatus {
+  PENDING
+  UPLOADING
+  READY
+  FAILED
+  DELETED
+
+  @@map("asset_status")
+}
+
+/// Espelha SceneAssetRole (lib/scene-assets/types.ts) — Sprint 2.0 (Asset
+/// Binding Engine). Ao contrário de `Asset.type` (que fica String de
+/// propósito, porque categorias de arquivo tendem a crescer), o papel que
+/// um Asset exerce dentro de uma cena é um vocabulário fechado e
+/// definido pelo produto — faz sentido como enum de banco.
+enum SceneAssetRole {
+  REFERENCE_IMAGE
+  REFERENCE_VIDEO
+  CONCEPT_ART
+  STORYBOARD
+  VOICE
+  MUSIC
+  SFX
+  DOCUMENT
+  PROMPT
+  MODEL
+  TEXTURE
+  FINAL_RENDER
+  OUTRO
+
+  @@map("scene_asset_role")
+}
+
+// -----------------------------------------------------------------------
+// Entidades
+// -----------------------------------------------------------------------
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects  Project[]
+  versions  Version[]
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+model Project {
+  id        String   @id @default(cuid())
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id])
+  name      String
+  author    String?
+  language  String?
+  objective String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pipelineExecutions PipelineExecution[]
+  versions           Version[]
+  assets             Asset[]
+
+  @@index([ownerId])
+  @@map("projects")
+}
+
+/// Execução do pipeline de um projeto. Persiste o que hoje o
+/// PipelineEngine mantém só em memória (ProjectPipelineStatus).
+model PipelineExecution {
+  id        String                @id @default(cuid())
+  projectId String
+  project   Project               @relation(fields: [projectId], references: [id])
+  status    ProjectPipelineStatus @default(idle)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  modules ModuleExecution[]
+  events  PipelineEvent[]
+
+  @@index([projectId])
+  @@map("pipeline_executions")
+}
+
+/// Um registro por (execução, módulo). Persiste ModuleExecutionState.
+/// `moduleId` é String (não enum) de propósito: a lista canônica de
+/// módulos continua vivendo só no registry (lib/pipeline-core/registry.ts)
+/// — o banco não deve duplicar essa fonte de verdade.
+model ModuleExecution {
+  id                  String                @id @default(cuid())
+  pipelineExecutionId String
+  pipelineExecution   PipelineExecution     @relation(fields: [pipelineExecutionId], references: [id])
+  moduleId            String
+  status              ModuleExecutionStatus @default(pending)
+  pct                 Int                   @default(0)
+  eta                 String?
+  description         String?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  @@unique([pipelineExecutionId, moduleId])
+  @@map("module_executions")
+}
+
+/// Log append-only de cada PipelineEngineEvent emitido pelo Engine
+/// (project-started, module-finished, module-failed etc.) — alimentado
+/// pelo subscribe() já existente desde a Sprint 1.1. Auditoria/histórico
+/// específico do pipeline.
+model PipelineEvent {
+  id                  String            @id @default(cuid())
+  pipelineExecutionId String
+  pipelineExecution   PipelineExecution @relation(fields: [pipelineExecutionId], references: [id])
+  type                String
+  moduleId            String?
+  payload             Json?
+  createdAt           DateTime          @default(now())
+
+  @@index([pipelineExecutionId])
+  @@map("pipeline_events")
+}
+
+/// Snapshot completo e deliberado de um projeto — histórico, rollback e
+/// versionamento. Diferente de PipelineEvent: não é uma transição fina,
+/// é um "ponto de restauração" salvo periodicamente ou sob comando
+/// explícito.
+model Version {
+  id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id])
+  versionNumber Int
+  label         String?
+  snapshot      Json
+  createdById   String?
+  createdBy     User?    @relation(fields: [createdById], references: [id])
+  createdAt     DateTime @default(now())
+
+  @@unique([projectId, versionNumber])
+  @@map("versions")
+}
+
+/// Auditoria geral da plataforma — independente de PipelineEvent. Cobre
+/// login, alteração de configuração, mudança de permissões, exportação e
+/// ações administrativas. `userId` opcional para cobrir ações de sistema.
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+// -----------------------------------------------------------------------
+// Asset Manager (Sprint 1.7) — módulo deliberadamente desacoplado do
+// Pipeline: a única relação é com Project (um Asset pertence a um
+// projeto, exatamente como uma PipelineExecution pertence a um projeto).
+// Nenhuma FK para PipelineExecution/ModuleExecution/PipelineEvent/Version
+// — os dois domínios não se conhecem.
+// -----------------------------------------------------------------------
+
+/// Persistência de um arquivo gerenciado pelo Asset Manager — futura base
+/// do AZ Vault. Espelha `Asset` (lib/assets/types.ts).
+///
+/// Decisões pensadas para escala (milhões de arquivos, dezenas de TB,
+/// múltiplos provedores de storage — Sprint 1.7):
+///
+/// - `size` é BigInt, não Int: Int estoura em ~2GB, o que é menor que um
+///   único arquivo de vídeo real. BigInt não impõe teto artificial.
+/// - `type` e `storageProvider` são String, não enum do Postgres: ao
+///   contrário de `status` (um ciclo de vida genérico e fechado), a lista
+///   de categorias de asset (hoje: image/video/audio/document/other/
+///   subtitle/ai-model) e de provedores de storage (S3/R2/MinIO/GCS/
+///   Backblaze) só tende a crescer — um enum de banco exigiria uma
+///   migration a cada novo provedor ou categoria; String deixa isso ser
+///   só uma mudança no domínio (lib/assets/types.ts), sem migration.
+/// - `hash` é indexado (não único) para permitir dedução de duplicados no
+///   futuro sem forçar essa regra de negócio no schema agora.
+/// - `storageKey`/`storageProvider` são só referências opacas — o schema
+///   (e o domínio) não sabem nada sobre bucket, região, credenciais ou
+///   protocolo de nenhum provedor concreto.
+model Asset {
+  id              String      @id @default(cuid())
+  projectId       String
+  project         Project     @relation(fields: [projectId], references: [id])
+  type            String
+  name            String
+  originalName    String
+  mimeType        String
+  extension       String
+  size            BigInt
+  hash            String?
+  storageKey      String?
+  storageProvider String?
+  status          AssetStatus @default(PENDING)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  sceneAssets SceneAsset[]
+
+  @@index([projectId])
+  @@index([projectId, status])
+  @@index([hash])
+  @@map("assets")
+}
+
+// -----------------------------------------------------------------------
+// Asset Binding Engine (Sprint 2.0) — módulo de relacionamento entre
+// Scene e Asset. Não duplica Asset, não move arquivo, não cria Storage
+// novo: é só o vínculo. Deliberadamente independente do Pipeline (mesma
+// disciplina do Asset Manager) — a única FK real é para Asset (o vínculo
+// não existe sem o Asset que ele referencia). `sceneId` é String, sem FK:
+// não existe uma tabela `Scene` ainda (Storyboard hoje é dado mockado em
+// lib/data.ts, indexado por número de cena) — mesmo princípio já usado em
+// `ModuleExecution.moduleId`, que também referencia uma fonte de verdade
+// que não é uma tabela do Prisma.
+// -----------------------------------------------------------------------
+
+/// Vínculo entre uma cena do Storyboard e um Asset já existente — a
+/// resposta a "quais Assets pertencem à cena N, e com que papel". Espelha
+/// `SceneAsset` (lib/scene-assets/types.ts).
+model SceneAsset {
+  id        String         @id @default(cuid())
+  sceneId   String
+  assetId   String
+  asset     Asset          @relation(fields: [assetId], references: [id])
+  role      SceneAssetRole
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@unique([sceneId, assetId, role])
+  @@index([sceneId])
+  @@index([assetId])
+  @@map("scene_assets")
+}

@@ -61,6 +61,33 @@ O repositório é organizado em duas camadas conceituais:
   (`knowledge-core/`), templates de prompt (`prompts/`), scripts de
   automação (`scripts/`) e testes (`tests/`).
 
+### Pipeline Core
+
+O motor de produção do Raven (`lib/pipeline-core/`, `lib/pipeline-service/`,
+`lib/repositories/`) segue uma arquitetura em camadas, documentada em
+detalhe em `docs/architecture/` (diagramas Mermaid, ADRs e regras de
+dependência):
+
+- **Pipeline Engine** — máquina de estados **determinística**: as mesmas
+  entradas sempre produzem a mesma saída, sem I/O, sem rede, sem banco.
+  Não conhece Prisma, Repository, API nem UI.
+- **Repository Pattern** — a persistência vive atrás de um contrato
+  (`PipelineRepository`); só a implementação concreta
+  (`PrismaPipelineRepository`) e o cliente do banco conhecem Prisma.
+- **Dependency Injection** — o `PipelineService` recebe o Repository via
+  construtor, nunca instanciando a implementação concreta na sua lógica
+  — o que permite testar o Service com um repositório falso em memória.
+- **Prisma + PostgreSQL** — camada de persistência real, escolhida após
+  análise comparativa de bancos e ORMs (ver `docs/architecture/adr/ADR-0002.md`).
+- **Server Components e Client Components** — código exclusivo de
+  servidor (Prisma, `pg`) é isolado com `import "server-only"`, para o
+  build falhar de forma clara caso algum Client Component tente
+  importá-lo (ver `docs/architecture/adr/ADR-0005.md`).
+
+Documentação completa: `docs/architecture/system-architecture.md`
+(diagramas), `docs/architecture/dependency-rules.md` (regras) e
+`docs/architecture/adr/` (decisões e seus porquês).
+
 ## Tecnologias
 
 - **Next.js** (App Router) — framework e roteamento
@@ -93,6 +120,62 @@ Build de produção:
 npm run build
 npm start
 ```
+
+## Banco de dados (PostgreSQL via Docker)
+
+O Pipeline Core (Sprint 1.3) persiste em PostgreSQL através do Prisma.
+Ambiente local padronizado via Docker Compose — nenhuma instalação de
+Postgres na máquina é necessária.
+
+1. Copie o arquivo de variáveis de ambiente (se ainda não tiver um `.env`):
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Suba o banco:
+
+   ```bash
+   docker compose up -d
+   ```
+
+3. Confirme que subiu e está saudável:
+
+   ```bash
+   docker compose ps
+   ```
+
+   O serviço `postgres` deve aparecer como `healthy` depois de alguns
+   segundos.
+
+4. Para parar o banco (mantendo os dados):
+
+   ```bash
+   docker compose stop
+   ```
+
+   Para parar e remover o container (os dados continuam no volume):
+
+   ```bash
+   docker compose down
+   ```
+
+   Para apagar também os dados (reset completo do banco local):
+
+   ```bash
+   docker compose down -v
+   ```
+
+Os dados do Postgres ficam num volume Docker nomeado
+(`az_raven_postgres_data`), persistente entre `docker compose down`/`up` —
+só é apagado com `-v` explícito.
+
+Com o banco no ar, `DATABASE_URL` em `.env` já aponta para
+`localhost:5432` com as credenciais definidas em `POSTGRES_USER`/
+`POSTGRES_PASSWORD`/`POSTGRES_DB` (mesmas variáveis usadas pelo
+`docker-compose.yml` para criar o banco). Migrations do Prisma (`prisma
+migrate dev`) ainda não fazem parte deste passo — chegam numa Task
+seguinte.
 
 ## Estrutura das pastas
 

@@ -5,6 +5,7 @@ import { Scene } from "@/lib/types";
 import Badge, { statusTone } from "./ui/Badge";
 import Button from "./ui/Button";
 import { useToast } from "./providers/ToastProvider";
+import SceneAssetsPanel from "./sceneAssets/SceneAssetsPanel";
 
 export default function SceneCard({ scene }: { scene: Scene }) {
   const { showToast } = useToast();
@@ -46,6 +47,7 @@ export default function SceneCard({ scene }: { scene: Scene }) {
             ))}
           </div>
         </div>
+        <SceneAssetsPanel sceneId={String(scene.n)} projectId="o-corvo" />
         <div className="mt-auto flex gap-2 pt-3">
           <Button
             variant="ghost"

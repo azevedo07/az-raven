@@ -5,8 +5,6 @@ import {
   PlatformStrategy,
 } from "./types";
 
-export { getPipelineModules } from "./pipeline-core/store";
-
 /**
  * Camada de dados do Raven Studio.
  * Hoje retorna dados mockados em memória; na Sprint 1 estas funções
@@ -250,9 +248,13 @@ export const worldBible = [
   { label: "Referências cinematográficas", value: "Sleepy Hollow, The Others, Crimson Peak" },
 ];
 
-// getPipelineModules (re-exportado acima) busca o estado real do
-// Pipeline Core através da API interna (app/api/pipeline) — não é mais
-// um array nem uma leitura direta do engine; ver lib/pipeline-core/store.ts.
+// `getPipelineModules` NÃO é mais re-exportado por este arquivo — ver
+// nota de arquitetura no topo de `lib/pipeline-core/store.ts`. Este
+// arquivo (`lib/data.ts`) é importado por Client Components (ex.:
+// `app/audience-intelligence/page.tsx`); manter o Pipeline Core (que
+// depende de Prisma/`pg`, código exclusivo de servidor) fora do grafo de
+// import deste arquivo evita vazar módulos Node-only para o bundle do
+// navegador.
 
 export const promptCategories: { key: string; label: string; code: string }[] = [
   {

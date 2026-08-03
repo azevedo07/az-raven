@@ -1,8 +1,16 @@
 node_modules
 .next
 out
+.env
 .env*.local
+!.env.example
 npm-debug.log*
 .DS_Store
 *.tsbuildinfo
 next-env.d.ts
+
+# Cliente Prisma gerado (Sprint 1.3) — código gerado, não deve ser commitado
+lib/generated
+
+# Arquivos gravados pelo LocalStorageAdapter em desenvolvimento (Sprint 1.8) — nunca commitados, nunca em public/
+/storage/uploads
