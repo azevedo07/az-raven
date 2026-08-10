@@ -2,10 +2,16 @@ import { SceneAssetWithDetails, SceneAssetRole } from "../types";
 import { SceneAssetService } from "../sceneAssetService";
 import { SceneIdInput, UseCase } from "./shared";
 
-/** Entrada de `AttachAssetToSceneUseCase`: a cena, o Asset e o papel que ele exerce nela. */
+/**
+ * Entrada de `AttachAssetToSceneUseCase`: a cena, o Asset, o papel que
+ * ele exerce nela e, opcionalmente, sua posição (`order`) e `metadata`
+ * livre. Quando `order` é omitido, o Repository anexa ao final da cena.
+ */
 export interface AttachAssetToSceneInput extends SceneIdInput {
   assetId: string;
   role: SceneAssetRole;
+  order?: number;
+  metadata?: Record<string, unknown> | null;
 }
 
 /**
@@ -25,7 +31,7 @@ export interface AttachAssetToSceneUseCase extends UseCase<AttachAssetToSceneInp
 export class AttachAssetToSceneUseCaseImpl implements AttachAssetToSceneUseCase {
   constructor(private readonly sceneAssetService: SceneAssetService) {}
 
-  async execute({ sceneId, assetId, role }: AttachAssetToSceneInput): Promise<SceneAssetWithDetails> {
-    return this.sceneAssetService.attachAsset({ sceneId, assetId, role });
+  async execute({ sceneId, assetId, role, order, metadata }: AttachAssetToSceneInput): Promise<SceneAssetWithDetails> {
+    return this.sceneAssetService.attachAsset({ sceneId, assetId, role, order, metadata });
   }
 }

@@ -8,7 +8,9 @@ import { roleLabel, SceneAssetRecord } from "./utils";
  * Uma miniatura de Asset vinculado a uma cena, com preview rápido no
  * hover (imagem/vídeo/áudio, direto de `GET /api/assets/:id/download` —
  * mesma técnica de `components/assets/AssetPreview.tsx`) e um botão de
- * desvincular. Sprint 2.0.
+ * desvincular. Sprint 2.0; selo de ordem adicionado na Task "Scene
+ * Asset Binding" (`sceneAsset.order`, 0-based — exibido como posição
+ * 1-based, mais natural para quem lê a UI).
  */
 export default function SceneAssetThumbnail({
   sceneAsset,
@@ -35,6 +37,14 @@ export default function SceneAssetThumbnail({
           <TypeGlyph type={displayType} />
         )}
       </div>
+
+      <span
+        data-testid="scene-asset-order-badge"
+        aria-hidden
+        className="absolute -bottom-1.5 -left-1.5 flex h-4 min-w-4 items-center justify-center rounded-full border border-borderStrong bg-panel px-1 font-mono text-[9px] text-textTertiary"
+      >
+        {sceneAsset.order + 1}
+      </span>
 
       <button
         type="button"
@@ -70,6 +80,7 @@ export default function SceneAssetThumbnail({
           <div className="truncate text-[11px] font-medium text-white">{sceneAsset.asset.name}</div>
           <div className="flex items-center justify-between text-[10px] text-textTertiary">
             <span>{roleLabel(sceneAsset.role)}</span>
+            <span>#{sceneAsset.order + 1}</span>
             <span>{formatBytes(sceneAsset.asset.size)}</span>
           </div>
         </div>

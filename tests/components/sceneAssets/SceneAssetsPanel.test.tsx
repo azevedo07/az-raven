@@ -6,10 +6,11 @@ import { ASSET_DRAG_MIME_TYPE } from "../../../components/assets/AssetCard";
 
 /**
  * Testes de integração do painel "📎 Assets" embutido em cada cena do
- * Storyboard (Sprint 2.0 — Asset Binding Engine). `fetch` é mockado — o
- * componente só fala com `/api/scene-assets*` e `/api/assets*` (nunca
- * Service/Repository/Storage diretamente), então mockar `fetch` é
- * suficiente para testar o fluxo completo sem servidor real.
+ * Storyboard (Sprint 2.0 — Asset Binding Engine; rotas migradas para
+ * `/api/scenes/:sceneId/assets*` na Task "Scene Asset Binding"). `fetch`
+ * é mockado — o componente só fala com essas rotas e `/api/assets*`
+ * (nunca Service/Repository/Storage diretamente), então mockar `fetch`
+ * é suficiente para testar o fluxo completo sem servidor real.
  */
 
 function buildAsset(overrides: Record<string, unknown> = {}) {
@@ -38,6 +39,8 @@ function buildSceneAsset(overrides: Record<string, unknown> = {}) {
     sceneId: "12",
     assetId: "asset-1",
     role: "REFERENCE_IMAGE",
+    order: 0,
+    metadata: null,
     createdAt: new Date("2026-01-01T10:00:00Z").toISOString(),
     updatedAt: new Date("2026-01-01T10:00:00Z").toISOString(),
     asset: {
@@ -91,7 +94,7 @@ describe("SceneAssetsPanel", () => {
 
   it("carrega e mostra miniaturas com o contador correto", async () => {
     const fetchMock = vi.fn().mockImplementation((url: string) => {
-      if (typeof url === "string" && url.startsWith("/api/scene-assets")) {
+      if (typeof url === "string" && url.startsWith("/api/scenes/12/assets")) {
         return jsonResponse(200, [buildSceneAsset()]);
       }
       return jsonResponse(200, []);
@@ -102,7 +105,7 @@ describe("SceneAssetsPanel", () => {
 
     await waitFor(() => expect(screen.getByAltText("poster.png")).toBeInTheDocument());
     expect(screen.getByTestId("scene-asset-counter")).toHaveTextContent("Cena 12 · 1 Asset");
-    expect(fetchMock).toHaveBeenCalledWith("/api/scene-assets?sceneId=12");
+    expect(fetchMock).toHaveBeenCalledWith("/api/scenes/12/assets");
   });
 
   it("mostra erro quando a listagem falha", async () => {
@@ -126,11 +129,11 @@ describe("SceneAssetsPanel", () => {
 
   it("vincula um asset ao clicar num item da Biblioteca dentro do picker", async () => {
     const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-      if (init?.method === "POST" && url === "/api/scene-assets") {
+      if (init?.method === "POST" && url === "/api/scenes/12/assets") {
         return jsonResponse(201, buildSceneAsset());
       }
-      if (typeof url === "string" && url.startsWith("/api/scene-assets")) {
-        return jsonResponse(200, init?.method === "POST" ? [] : []);
+      if (typeof url === "string" && url.startsWith("/api/scenes/12/assets")) {
+        return jsonResponse(200, []);
       }
       if (typeof url === "string" && url.startsWith("/api/assets?")) {
         return jsonResponse(200, [buildAsset()]);
@@ -150,10 +153,10 @@ describe("SceneAssetsPanel", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/scene-assets",
+        "/api/scenes/12/assets",
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify({ sceneId: "12", assetId: "asset-1", role: "REFERENCE_IMAGE" }),
+          body: JSON.stringify({ assetId: "asset-1", role: "REFERENCE_IMAGE" }),
         })
       )
     );
@@ -193,7 +196,7 @@ describe("SceneAssetsPanel", () => {
       if (init?.method === "DELETE") {
         return Promise.resolve({ ok: true, status: 204, json: async () => null });
       }
-      if (typeof url === "string" && url.startsWith("/api/scene-assets")) {
+      if (typeof url === "string" && url.startsWith("/api/scenes/12/assets")) {
         return jsonResponse(200, [buildSceneAsset()]);
       }
       return jsonResponse(200, []);
@@ -206,20 +209,20 @@ describe("SceneAssetsPanel", () => {
     fireEvent.click(screen.getByLabelText("Desvincular poster.png"));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/scene-assets/scene-asset-1", { method: "DELETE" })
+      expect(fetchMock).toHaveBeenCalledWith("/api/scenes/12/assets/scene-asset-1", { method: "DELETE" })
     );
     await waitFor(() => expect(screen.getByText(/Nenhum asset vinculado/)).toBeInTheDocument());
   });
 
   it("vincula um asset ao soltar (drag and drop) direto sobre o painel", async () => {
     const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-      if (init?.method === "POST" && url === "/api/scene-assets") {
+      if (init?.method === "POST" && url === "/api/scenes/12/assets") {
         return jsonResponse(201, buildSceneAsset());
       }
       if (url === "/api/assets/asset-1") {
         return jsonResponse(200, buildAsset());
       }
-      if (typeof url === "string" && url.startsWith("/api/scene-assets")) {
+      if (typeof url === "string" && url.startsWith("/api/scenes/12/assets")) {
         return jsonResponse(200, []);
       }
       return jsonResponse(200, []);
@@ -236,10 +239,10 @@ describe("SceneAssetsPanel", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/scene-assets",
+        "/api/scenes/12/assets",
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify({ sceneId: "12", assetId: "asset-1", role: "REFERENCE_IMAGE" }),
+          body: JSON.stringify({ assetId: "asset-1", role: "REFERENCE_IMAGE" }),
         })
       )
     );
@@ -249,7 +252,7 @@ describe("SceneAssetsPanel", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation((url: string) => {
-        if (typeof url === "string" && url.startsWith("/api/scene-assets")) {
+        if (typeof url === "string" && url.startsWith("/api/scenes/12/assets")) {
           return jsonResponse(200, [buildSceneAsset()]);
         }
         return jsonResponse(200, []);
@@ -267,5 +270,22 @@ describe("SceneAssetsPanel", () => {
 
     fireEvent.mouseLeave(wrapper);
     await waitFor(() => expect(screen.queryByTestId("scene-asset-hover-preview")).not.toBeInTheDocument());
+  });
+
+  it("mostra o selo de ordem (posição 1-based) na miniatura", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (typeof url === "string" && url.startsWith("/api/scenes/12/assets")) {
+          return jsonResponse(200, [buildSceneAsset({ order: 2 })]);
+        }
+        return jsonResponse(200, []);
+      })
+    );
+
+    render(<SceneAssetsPanel sceneId="12" projectId="o-corvo" />);
+    await waitFor(() => expect(screen.getByAltText("poster.png")).toBeInTheDocument());
+
+    expect(screen.getByTestId("scene-asset-order-badge")).toHaveTextContent("3");
   });
 });

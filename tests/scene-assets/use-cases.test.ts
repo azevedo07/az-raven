@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SceneAssetService } from "../../lib/scene-assets/sceneAssetService";
 import { SceneAsset } from "../../lib/scene-assets/types";
-import { AttachAssetInput, SceneAssetRepository } from "../../lib/scene-assets/repository";
+import { AttachAssetInput, SceneAssetRepository, UpdateSceneAssetInput } from "../../lib/scene-assets/repository";
 import { SceneAssetAlreadyLinkedError } from "../../lib/scene-assets/errors";
 import { AssetService } from "../../lib/assets/assetService";
 import { Asset } from "../../lib/assets/types";
@@ -11,7 +11,7 @@ import { DownloadResult, StorageProvider, UploadResult } from "../../lib/storage
 import { AttachAssetToSceneUseCaseImpl } from "../../lib/scene-assets/use-cases/attachAssetToSceneUseCase";
 import { DetachAssetFromSceneUseCaseImpl } from "../../lib/scene-assets/use-cases/detachAssetFromSceneUseCase";
 import { ListSceneAssetsUseCaseImpl } from "../../lib/scene-assets/use-cases/listSceneAssetsUseCase";
-import { UpdateSceneAssetRoleUseCaseImpl } from "../../lib/scene-assets/use-cases/updateSceneAssetRoleUseCase";
+import { UpdateSceneAssetUseCaseImpl } from "../../lib/scene-assets/use-cases/updateSceneAssetUseCase";
 
 class FakeSceneAssetRepository implements SceneAssetRepository {
   private readonly rows = new Map<string, SceneAsset>();
@@ -26,7 +26,17 @@ class FakeSceneAssetRepository implements SceneAssetRepository {
     }
     this.counter += 1;
     const now = new Date();
-    const row: SceneAsset = { id: `scene-asset-${this.counter}`, ...input, createdAt: now, updatedAt: now };
+    const existingInScene = [...this.rows.values()].filter((r) => r.sceneId === input.sceneId);
+    const row: SceneAsset = {
+      id: `scene-asset-${this.counter}`,
+      sceneId: input.sceneId,
+      assetId: input.assetId,
+      role: input.role,
+      order: input.order ?? (existingInScene.length === 0 ? 0 : Math.max(...existingInScene.map((r) => r.order)) + 1),
+      metadata: input.metadata ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
     this.rows.set(row.id, row);
     return row;
   }
@@ -40,13 +50,21 @@ class FakeSceneAssetRepository implements SceneAssetRepository {
   }
 
   async listBySceneId(sceneId: string): Promise<SceneAsset[]> {
-    return [...this.rows.values()].filter((r) => r.sceneId === sceneId);
+    return [...this.rows.values()]
+      .filter((r) => r.sceneId === sceneId)
+      .sort((a, b) => a.order - b.order);
   }
 
-  async updateRole(id: string, role: SceneAsset["role"]): Promise<SceneAsset | undefined> {
+  async update(id: string, input: UpdateSceneAssetInput): Promise<SceneAsset | undefined> {
     const existing = this.rows.get(id);
     if (!existing) return undefined;
-    const updated = { ...existing, role, updatedAt: new Date() };
+    const updated: SceneAsset = {
+      ...existing,
+      role: input.role ?? existing.role,
+      order: input.order ?? existing.order,
+      metadata: input.metadata !== undefined ? input.metadata : existing.metadata,
+      updatedAt: new Date(),
+    };
     this.rows.set(id, updated);
     return updated;
   }
@@ -180,7 +198,7 @@ describe("ListSceneAssetsUseCase", () => {
   });
 });
 
-describe("UpdateSceneAssetRoleUseCase", () => {
+describe("UpdateSceneAssetUseCase", () => {
   it("atualiza o papel de um vínculo existente", async () => {
     const { service, assetService } = buildService();
     const asset = await assetService.createAsset(createInput());
@@ -190,7 +208,7 @@ describe("UpdateSceneAssetRoleUseCase", () => {
       role: "MUSIC",
     });
 
-    const updated = await new UpdateSceneAssetRoleUseCaseImpl(service).execute({
+    const updated = await new UpdateSceneAssetUseCaseImpl(service).execute({
       sceneAssetId: linked.id,
       role: "SFX",
     });
@@ -198,9 +216,29 @@ describe("UpdateSceneAssetRoleUseCase", () => {
     expect(updated?.role).toBe("SFX");
   });
 
+  it("atualiza order e metadata sem exigir role", async () => {
+    const { service, assetService } = buildService();
+    const asset = await assetService.createAsset(createInput());
+    const linked = await new AttachAssetToSceneUseCaseImpl(service).execute({
+      sceneId: "1",
+      assetId: asset.id,
+      role: "MUSIC",
+    });
+
+    const updated = await new UpdateSceneAssetUseCaseImpl(service).execute({
+      sceneAssetId: linked.id,
+      order: 4,
+      metadata: { nota: "trilha do clímax" },
+    });
+
+    expect(updated?.role).toBe("MUSIC");
+    expect(updated?.order).toBe(4);
+    expect(updated?.metadata).toEqual({ nota: "trilha do clímax" });
+  });
+
   it("retorna undefined para um vínculo inexistente", async () => {
     const { service } = buildService();
-    const result = await new UpdateSceneAssetRoleUseCaseImpl(service).execute({
+    const result = await new UpdateSceneAssetUseCaseImpl(service).execute({
       sceneAssetId: "scene-asset-fantasma",
       role: "SFX",
     });

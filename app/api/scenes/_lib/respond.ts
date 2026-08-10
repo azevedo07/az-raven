@@ -12,6 +12,6 @@ export function errorResponse(status: number, code: string, message: string) {
 
 /** 500 genérico — nunca inclui `error.message`/stack do erro original na resposta; loga no servidor via `console.error`. */
 export function internalErrorResponse(context: string, error: unknown) {
-  console.error(`[api/scene-assets] ${context}:`, error);
+  console.error(`[api/scenes] ${context}:`, error);
   return errorResponse(500, "INTERNAL_ERROR", "Erro interno do servidor.");
 }

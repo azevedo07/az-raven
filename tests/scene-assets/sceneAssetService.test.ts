@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SceneAssetService } from "../../lib/scene-assets/sceneAssetService";
 import { SceneAssetDomainEvent, SceneAsset } from "../../lib/scene-assets/types";
-import { AttachAssetInput, SceneAssetRepository } from "../../lib/scene-assets/repository";
+import { AttachAssetInput, SceneAssetRepository, UpdateSceneAssetInput } from "../../lib/scene-assets/repository";
 import { SceneAssetAlreadyLinkedError, SceneAssetTargetNotFoundError } from "../../lib/scene-assets/errors";
 import { AssetService } from "../../lib/assets/assetService";
 import { Asset } from "../../lib/assets/types";
@@ -10,7 +10,7 @@ import { StorageAdapter } from "../../lib/storage/storageAdapter";
 import { DownloadResult, StorageMetadata, StorageProvider, UploadResult } from "../../lib/storage/types";
 import { StorageFileNotFoundError } from "../../lib/storage/storageErrors";
 
-/** Repositório falso em memória do Asset Binding Engine. */
+/** Repositório falso em memória do Asset Binding Engine — mesma semântica de `order`/`update` de `PrismaSceneAssetRepository`. */
 class FakeSceneAssetRepository implements SceneAssetRepository {
   private readonly rows = new Map<string, SceneAsset>();
   private counter = 0;
@@ -29,6 +29,8 @@ class FakeSceneAssetRepository implements SceneAssetRepository {
       sceneId: input.sceneId,
       assetId: input.assetId,
       role: input.role,
+      order: input.order ?? this.nextOrder(input.sceneId),
+      metadata: input.metadata ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -47,21 +49,38 @@ class FakeSceneAssetRepository implements SceneAssetRepository {
   async listBySceneId(sceneId: string): Promise<SceneAsset[]> {
     return [...this.rows.values()]
       .filter((r) => r.sceneId === sceneId)
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      .sort((a, b) => a.order - b.order || a.createdAt.getTime() - b.createdAt.getTime());
   }
 
-  async updateRole(id: string, role: SceneAsset["role"]): Promise<SceneAsset | undefined> {
+  async update(id: string, input: UpdateSceneAssetInput): Promise<SceneAsset | undefined> {
     const existing = this.rows.get(id);
     if (!existing) return undefined;
-    const conflict = [...this.rows.values()].find(
-      (r) => r.id !== id && r.sceneId === existing.sceneId && r.assetId === existing.assetId && r.role === role
-    );
-    if (conflict) {
-      throw new SceneAssetAlreadyLinkedError(existing.sceneId, existing.assetId, role);
+
+    const nextRole = input.role ?? existing.role;
+    if (input.role !== undefined) {
+      const conflict = [...this.rows.values()].find(
+        (r) => r.id !== id && r.sceneId === existing.sceneId && r.assetId === existing.assetId && r.role === nextRole
+      );
+      if (conflict) {
+        throw new SceneAssetAlreadyLinkedError(existing.sceneId, existing.assetId, nextRole);
+      }
     }
-    const updated = { ...existing, role, updatedAt: new Date() };
+
+    const updated: SceneAsset = {
+      ...existing,
+      role: nextRole,
+      order: input.order ?? existing.order,
+      metadata: input.metadata !== undefined ? input.metadata : existing.metadata,
+      updatedAt: new Date(),
+    };
     this.rows.set(id, updated);
     return updated;
+  }
+
+  private nextOrder(sceneId: string): number {
+    const existing = [...this.rows.values()].filter((r) => r.sceneId === sceneId);
+    if (existing.length === 0) return 0;
+    return Math.max(...existing.map((r) => r.order)) + 1;
   }
 }
 
@@ -188,6 +207,20 @@ describe("SceneAssetService — attachAsset", () => {
     ).rejects.toThrow(SceneAssetTargetNotFoundError);
   });
 
+  it("cria o vínculo mesmo para um sceneId que não corresponde a nenhuma cena real — não há tabela Scene para validar contra", async () => {
+    // Documenta uma limitação arquitetural conhecida, não um bug: o
+    // Storyboard hoje é dado mockado (lib/data.ts), sem uma fonte de
+    // verdade persistida para "quais sceneId existem" — mesmo princípio
+    // já aceito para ModuleExecution.moduleId. Validar a existência real
+    // da cena exigiria uma tabela Scene, fora do escopo desta Task.
+    const { service, assetService } = buildScene();
+    const asset = await assetService.createAsset(createInput());
+
+    const linked = await service.attachAsset({ sceneId: "cena-que-nao-existe-no-mock", assetId: asset.id, role: "REFERENCE_IMAGE" });
+
+    expect(linked.sceneId).toBe("cena-que-nao-existe-no-mock");
+  });
+
   it("lança SceneAssetAlreadyLinkedError ao vincular o mesmo Asset com o mesmo papel duas vezes", async () => {
     const { service, assetService } = buildScene();
     const asset = await assetService.createAsset(createInput());
@@ -206,10 +239,61 @@ describe("SceneAssetService — attachAsset", () => {
     const second = await service.attachAsset({ sceneId: "1", assetId: asset.id, role: "CONCEPT_ART" });
     expect(second.role).toBe("CONCEPT_ART");
   });
+
+  it("permite vincular um Asset de qualquer projeto — SceneAsset não guarda nem filtra por projectId", async () => {
+    // Documenta o comportamento atual, não introduzido por esta Task: um
+    // Asset já é buscado globalmente por id em AssetService.getAsset
+    // (sem filtro de projeto); isolamento multi-projeto por cena
+    // exigiria uma tabela Scene com projectId, fora do escopo.
+    const { service, assetService } = buildScene();
+    const assetDeOutroProjeto = await assetService.createAsset(createInput({ projectId: "outro-projeto" }));
+
+    const linked = await service.attachAsset({ sceneId: "1", assetId: assetDeOutroProjeto.id, role: "REFERENCE_IMAGE" });
+
+    expect(linked.asset.id).toBe(assetDeOutroProjeto.id);
+  });
+
+  it("anexa ao final da cena (maior order + 1) quando order não é informado", async () => {
+    const { service, assetService } = buildScene();
+    const a1 = await assetService.createAsset(createInput({ name: "a.png" }));
+    const a2 = await assetService.createAsset(createInput({ name: "b.png" }));
+
+    const first = await service.attachAsset({ sceneId: "1", assetId: a1.id, role: "REFERENCE_IMAGE" });
+    const second = await service.attachAsset({ sceneId: "1", assetId: a2.id, role: "MUSIC" });
+
+    expect(first.order).toBe(0);
+    expect(second.order).toBe(1);
+  });
+
+  it("respeita um order explícito quando informado", async () => {
+    const { service, assetService } = buildScene();
+    const asset = await assetService.createAsset(createInput());
+
+    const linked = await service.attachAsset({ sceneId: "1", assetId: asset.id, role: "REFERENCE_IMAGE", order: 7 });
+
+    expect(linked.order).toBe(7);
+  });
+
+  it("persiste metadata livre e devolve null quando não informada", async () => {
+    const { service, assetService } = buildScene();
+    const a1 = await assetService.createAsset(createInput({ name: "a.png" }));
+    const a2 = await assetService.createAsset(createInput({ name: "b.png" }));
+
+    const withMetadata = await service.attachAsset({
+      sceneId: "1",
+      assetId: a1.id,
+      role: "REFERENCE_IMAGE",
+      metadata: { nota: "closeup no rosto" },
+    });
+    const withoutMetadata = await service.attachAsset({ sceneId: "1", assetId: a2.id, role: "MUSIC" });
+
+    expect(withMetadata.metadata).toEqual({ nota: "closeup no rosto" });
+    expect(withoutMetadata.metadata).toBeNull();
+  });
 });
 
 describe("SceneAssetService — detachAsset", () => {
-  it("remove um vínculo existente, emite ASSET_DETACHED e retorna true", async () => {
+  it("remove um vínculo existente, emite ASSET_DETACHED e retorna true — sem afetar o Asset", async () => {
     const { service, assetService } = buildScene();
     const asset = await assetService.createAsset(createInput());
     const linked = await service.attachAsset({ sceneId: "1", assetId: asset.id, role: "MUSIC" });
@@ -221,9 +305,12 @@ describe("SceneAssetService — detachAsset", () => {
 
     expect(result).toBe(true);
     expect(await service.listSceneAssets("1")).toHaveLength(0);
-    expect(events).toEqual([
-      { type: "ASSET_DETACHED", sceneAssetId: linked.id, sceneId: "1", assetId: asset.id },
-    ]);
+    expect(events).toEqual([{ type: "ASSET_DETACHED", sceneAssetId: linked.id, sceneId: "1", assetId: asset.id }]);
+
+    // O Asset em si continua existindo e legível pelo Asset Manager — só o vínculo foi removido.
+    const stillThere = await assetService.getAsset(asset.id);
+    expect(stillThere).toBeDefined();
+    expect(stillThere?.status).not.toBe("DELETED");
   });
 
   it("retorna false e não emite evento para um vínculo inexistente", async () => {
@@ -239,7 +326,7 @@ describe("SceneAssetService — detachAsset", () => {
 });
 
 describe("SceneAssetService — listSceneAssets", () => {
-  it("lista, em ordem de criação, os Assets vinculados a uma cena — só dessa cena", async () => {
+  it("lista, em ordem (order, desempate por criação), os Assets vinculados a uma cena — só dessa cena", async () => {
     const { service, assetService } = buildScene();
     const a1 = await assetService.createAsset(createInput({ name: "a.png" }));
     const a2 = await assetService.createAsset(createInput({ name: "b.png" }));
@@ -256,14 +343,26 @@ describe("SceneAssetService — listSceneAssets", () => {
     expect(sceneTwo).toHaveLength(1);
   });
 
+  it("respeita order explícito na listagem, mesmo fora da ordem de criação", async () => {
+    const { service, assetService } = buildScene();
+    const a1 = await assetService.createAsset(createInput({ name: "criado-primeiro.png" }));
+    const a2 = await assetService.createAsset(createInput({ name: "criado-segundo.png" }));
+
+    await service.attachAsset({ sceneId: "1", assetId: a1.id, role: "REFERENCE_IMAGE", order: 5 });
+    await service.attachAsset({ sceneId: "1", assetId: a2.id, role: "MUSIC", order: 1 });
+
+    const sceneOne = await service.listSceneAssets("1");
+    expect(sceneOne.map((s) => s.asset.name)).toEqual(["criado-segundo.png", "criado-primeiro.png"]);
+  });
+
   it("retorna lista vazia para uma cena sem vínculos", async () => {
     const { service } = buildScene();
     expect(await service.listSceneAssets("cena-sem-assets")).toEqual([]);
   });
 });
 
-describe("SceneAssetService — updateRole", () => {
-  it("atualiza o papel e emite ASSET_ROLE_UPDATED", async () => {
+describe("SceneAssetService — updateSceneAsset", () => {
+  it("atualiza o papel e emite ASSET_UPDATED com changes.role", async () => {
     const { service, assetService } = buildScene();
     const asset = await assetService.createAsset(createInput());
     const linked = await service.attachAsset({ sceneId: "1", assetId: asset.id, role: "REFERENCE_IMAGE" });
@@ -271,17 +370,62 @@ describe("SceneAssetService — updateRole", () => {
     const events: SceneAssetDomainEvent[] = [];
     service.subscribe((e) => events.push(e));
 
-    const updated = await service.updateRole(linked.id, "CONCEPT_ART");
+    const updated = await service.updateSceneAsset(linked.id, { role: "CONCEPT_ART" });
 
     expect(updated?.role).toBe("CONCEPT_ART");
     expect(events).toEqual([
-      { type: "ASSET_ROLE_UPDATED", sceneAssetId: linked.id, sceneId: "1", assetId: asset.id, role: "CONCEPT_ART" },
+      { type: "ASSET_UPDATED", sceneAssetId: linked.id, sceneId: "1", assetId: asset.id, changes: { role: "CONCEPT_ART" } },
     ]);
+  });
+
+  it("atualiza só order, sem tocar em role, e reflete isso em changes", async () => {
+    const { service, assetService } = buildScene();
+    const asset = await assetService.createAsset(createInput());
+    const linked = await service.attachAsset({ sceneId: "1", assetId: asset.id, role: "REFERENCE_IMAGE" });
+
+    const events: SceneAssetDomainEvent[] = [];
+    service.subscribe((e) => events.push(e));
+
+    const updated = await service.updateSceneAsset(linked.id, { order: 3 });
+
+    expect(updated?.role).toBe("REFERENCE_IMAGE");
+    expect(updated?.order).toBe(3);
+    expect(events).toEqual([
+      { type: "ASSET_UPDATED", sceneAssetId: linked.id, sceneId: "1", assetId: asset.id, changes: { order: 3 } },
+    ]);
+  });
+
+  it("atualiza metadata, incluindo limpar para null", async () => {
+    const { service, assetService } = buildScene();
+    const asset = await assetService.createAsset(createInput());
+    const linked = await service.attachAsset({
+      sceneId: "1",
+      assetId: asset.id,
+      role: "REFERENCE_IMAGE",
+      metadata: { nota: "v1" },
+    });
+
+    const updated = await service.updateSceneAsset(linked.id, { metadata: { nota: "v2" } });
+    expect(updated?.metadata).toEqual({ nota: "v2" });
+
+    const cleared = await service.updateSceneAsset(linked.id, { metadata: null });
+    expect(cleared?.metadata).toBeNull();
+  });
+
+  it("lança SceneAssetAlreadyLinkedError quando a mudança de papel colide com outro vínculo do mesmo (sceneId, assetId)", async () => {
+    const { service, assetService } = buildScene();
+    const asset = await assetService.createAsset(createInput());
+    await service.attachAsset({ sceneId: "1", assetId: asset.id, role: "REFERENCE_IMAGE" });
+    const other = await service.attachAsset({ sceneId: "1", assetId: asset.id, role: "CONCEPT_ART" });
+
+    await expect(service.updateSceneAsset(other.id, { role: "REFERENCE_IMAGE" })).rejects.toThrow(
+      SceneAssetAlreadyLinkedError
+    );
   });
 
   it("retorna undefined para um vínculo inexistente", async () => {
     const { service } = buildScene();
-    expect(await service.updateRole("scene-asset-fantasma", "MUSIC")).toBeUndefined();
+    expect(await service.updateSceneAsset("scene-asset-fantasma", { role: "MUSIC" })).toBeUndefined();
   });
 });
 

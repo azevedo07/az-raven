@@ -3,9 +3,11 @@ import { readdirSync, readFileSync, statSync } from "fs";
 import { join, relative } from "path";
 
 /**
- * Guarda automatizada da arquitetura do Asset Binding Engine (Sprint 2.0):
+ * Guarda automatizada da arquitetura do Asset Binding Engine (Sprint 2.0;
+ * rotas migradas de `/api/scene-assets` para `/api/scenes/:sceneId/assets`
+ * na Task "Scene Asset Binding"):
  *
- *   HTTP (app/api/scene-assets/*) -> lib/scene-assets/container.ts (sceneAssetUseCases)
+ *   HTTP (app/api/scenes/[sceneId]/assets/*) -> lib/scene-assets/container.ts (sceneAssetUseCases)
  *     -> SceneAssetService -> SceneAssetRepository (interface) -> PrismaSceneAssetRepository -> Prisma
  *                           -> AssetService (lib/assets/container.ts — consumido, nunca reimplementado)
  *
@@ -195,10 +197,10 @@ describe("Fronteiras de arquitetura do Asset Binding Engine", () => {
     expect(importers).toEqual(["lib/scene-assets/container.ts"]);
   });
 
-  it("as rotas de /api/scene-assets importam exclusivamente lib/scene-assets/container.ts (e o tipo de erro, para instanceof)", () => {
+  it("as rotas de /api/scenes/:sceneId/assets importam exclusivamente lib/scene-assets/container.ts (e o tipo de erro, para instanceof)", () => {
     const routeFiles = [
-      join(ROOT, "app", "api", "scene-assets", "route.ts"),
-      join(ROOT, "app", "api", "scene-assets", "[sceneAssetId]", "route.ts"),
+      join(ROOT, "app", "api", "scenes", "[sceneId]", "assets", "route.ts"),
+      join(ROOT, "app", "api", "scenes", "[sceneId]", "assets", "[sceneAssetId]", "route.ts"),
     ];
 
     const forbidden = [

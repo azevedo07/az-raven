@@ -5,7 +5,7 @@ import { SceneAssetService } from "./sceneAssetService";
 import { AttachAssetToSceneUseCaseImpl } from "./use-cases/attachAssetToSceneUseCase";
 import { DetachAssetFromSceneUseCaseImpl } from "./use-cases/detachAssetFromSceneUseCase";
 import { ListSceneAssetsUseCaseImpl } from "./use-cases/listSceneAssetsUseCase";
-import { UpdateSceneAssetRoleUseCaseImpl } from "./use-cases/updateSceneAssetRoleUseCase";
+import { UpdateSceneAssetUseCaseImpl } from "./use-cases/updateSceneAssetUseCase";
 
 /**
  * Composition Root exclusivo do Asset Binding Engine (Sprint 2.0) — o
@@ -35,5 +35,5 @@ export const sceneAssetUseCases = {
   attachAssetToScene: new AttachAssetToSceneUseCaseImpl(sceneAssetService),
   detachAssetFromScene: new DetachAssetFromSceneUseCaseImpl(sceneAssetService),
   listSceneAssets: new ListSceneAssetsUseCaseImpl(sceneAssetService),
-  updateSceneAssetRole: new UpdateSceneAssetRoleUseCaseImpl(sceneAssetService),
+  updateSceneAsset: new UpdateSceneAssetUseCaseImpl(sceneAssetService),
 };

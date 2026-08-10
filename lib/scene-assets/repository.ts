@@ -15,11 +15,24 @@ export interface AttachAssetInput {
   sceneId: string;
   assetId: string;
   role: SceneAssetRole;
+  /** Posição do Asset na cena. Se omitida, o Repository anexa ao final (maior `order` já existente na cena + 1). */
+  order?: number;
+  metadata?: Record<string, unknown> | null;
+}
+
+/** Todos os campos são opcionais — só os presentes são alterados (mesmo princípio de `UpdateAssetInput` em `lib/assets/repository.ts`). */
+export interface UpdateSceneAssetInput {
+  role?: SceneAssetRole;
+  order?: number;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface SceneAssetRepository {
   /**
-   * Cria o vínculo.
+   * Cria o vínculo. Quando `input.order` não é informado, o Repository
+   * calcula o próximo valor (anexa ao final da cena) — não é regra de
+   * negócio, é só a semântica padrão de "novo vínculo entra no fim da
+   * lista".
    * @throws {import("./errors").SceneAssetAlreadyLinkedError} se (sceneId, assetId, role) já existir.
    */
   attach(input: AttachAssetInput): Promise<SceneAsset>;
@@ -30,12 +43,12 @@ export interface SceneAssetRepository {
   /** Busca um vínculo pelo id, ou `undefined` se não existir. */
   findById(id: string): Promise<SceneAsset | undefined>;
 
-  /** Lista os vínculos de uma cena, em ordem de criação. */
+  /** Lista os vínculos de uma cena, ordenados por `order` (desempate por `createdAt`). */
   listBySceneId(sceneId: string): Promise<SceneAsset[]>;
 
   /**
-   * Atualiza o papel de um vínculo existente; `undefined` se `id` não existir.
-   * @throws {import("./errors").SceneAssetAlreadyLinkedError} se o novo papel colidir com outro vínculo já existente para o mesmo (sceneId, assetId).
+   * Atualiza um vínculo existente (`role`/`order`/`metadata`, parcial); `undefined` se `id` não existir.
+   * @throws {import("./errors").SceneAssetAlreadyLinkedError} se a mudança de papel colidir com outro vínculo já existente para o mesmo (sceneId, assetId).
    */
-  updateRole(id: string, role: SceneAssetRole): Promise<SceneAsset | undefined>;
+  update(id: string, input: UpdateSceneAssetInput): Promise<SceneAsset | undefined>;
 }

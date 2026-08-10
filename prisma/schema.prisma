@@ -56,29 +56,6 @@ enum AssetStatus {
   @@map("asset_status")
 }
 
-/// Espelha SceneAssetRole (lib/scene-assets/types.ts) — Sprint 2.0 (Asset
-/// Binding Engine). Ao contrário de `Asset.type` (que fica String de
-/// propósito, porque categorias de arquivo tendem a crescer), o papel que
-/// um Asset exerce dentro de uma cena é um vocabulário fechado e
-/// definido pelo produto — faz sentido como enum de banco.
-enum SceneAssetRole {
-  REFERENCE_IMAGE
-  REFERENCE_VIDEO
-  CONCEPT_ART
-  STORYBOARD
-  VOICE
-  MUSIC
-  SFX
-  DOCUMENT
-  PROMPT
-  MODEL
-  TEXTURE
-  FINAL_RENDER
-  OUTRO
-
-  @@map("scene_asset_role")
-}
-
 // -----------------------------------------------------------------------
 // Entidades
 // -----------------------------------------------------------------------
@@ -262,31 +239,52 @@ model Asset {
 }
 
 // -----------------------------------------------------------------------
-// Asset Binding Engine (Sprint 2.0) — módulo de relacionamento entre
-// Scene e Asset. Não duplica Asset, não move arquivo, não cria Storage
-// novo: é só o vínculo. Deliberadamente independente do Pipeline (mesma
-// disciplina do Asset Manager) — a única FK real é para Asset (o vínculo
-// não existe sem o Asset que ele referencia). `sceneId` é String, sem FK:
-// não existe uma tabela `Scene` ainda (Storyboard hoje é dado mockado em
-// lib/data.ts, indexado por número de cena) — mesmo princípio já usado em
-// `ModuleExecution.moduleId`, que também referencia uma fonte de verdade
-// que não é uma tabela do Prisma.
+// Asset Binding Engine (Sprint 2.0 / Task Scene Asset Binding) — módulo
+// de relacionamento entre Scene e Asset. Não duplica Asset, não move
+// arquivo, não cria Storage novo: é só o vínculo. Deliberadamente
+// independente do Pipeline (mesma disciplina do Asset Manager) — a única
+// FK real é para Asset (o vínculo não existe sem o Asset que ele
+// referencia). `sceneId` é String, sem FK: não existe uma tabela `Scene`
+// ainda (Storyboard hoje é dado mockado em lib/data.ts, indexado por
+// número de cena) — mesmo princípio já usado em `ModuleExecution.moduleId`,
+// que também referencia uma fonte de verdade que não é uma tabela do Prisma.
+//
+// `role` é `String`, não enum — revertido de um enum de banco (Sprint
+// 2.0) para `String` nesta Task: o vocabulário de papéis já mudou de uma
+// Task para a seguinte (13 valores orientados a mídia -> lista orientada
+// a finalidade narrativa como CHARACTER/LOCATION/PROP), provando que não
+// é o "vocabulário fechado e definido pelo produto" que o comentário
+// original assumia. Mesmo tratamento já dado a `Asset.storageProvider`
+// (ver comentário em lib/assets/types.ts): suportar um papel novo é só
+// código de aplicação (união TypeScript + lista de sugestões na camada
+// HTTP/UI), nunca uma migration.
 // -----------------------------------------------------------------------
 
 /// Vínculo entre uma cena do Storyboard e um Asset já existente — a
-/// resposta a "quais Assets pertencem à cena N, e com que papel". Espelha
-/// `SceneAsset` (lib/scene-assets/types.ts).
+/// resposta a "quais Assets pertencem à cena N, com que papel e em que
+/// ordem". Espelha `SceneAsset` (lib/scene-assets/types.ts).
 model SceneAsset {
-  id        String         @id @default(cuid())
+  id        String   @id @default(cuid())
   sceneId   String
   assetId   String
-  asset     Asset          @relation(fields: [assetId], references: [id])
-  role      SceneAssetRole
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  asset     Asset    @relation(fields: [assetId], references: [id])
+  role      String
+  /// Posição do Asset dentro da cena (0-based) — usada para ordenar a
+  /// listagem. Não é `@unique` por cena: a ordem pode ter empates
+  /// temporários (ex.: dois vínculos criados antes de uma reordenação
+  /// explícita); `listBySceneId` desempata por `createdAt`.
+  order     Int      @default(0)
+  /// Espaço aditivo livre para dados específicos do vínculo (ex.: nota do
+  /// diretor, timestamp de um clipe de vídeo) — nenhum Use Case ainda
+  /// escreve nele; existe para não exigir uma migration quando o primeiro
+  /// consumidor real (fora do escopo desta Task) precisar dele.
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([sceneId, assetId, role])
   @@index([sceneId])
   @@index([assetId])
+  @@index([sceneId, order])
   @@map("scene_assets")
 }

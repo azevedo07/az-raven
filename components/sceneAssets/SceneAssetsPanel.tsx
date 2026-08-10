@@ -13,11 +13,12 @@ interface SceneAssetsPanelProps {
 }
 
 /**
- * Painel "📎 Assets" embutido em cada `SceneCard` (Sprint 2.0). Só fala
- * com `GET/POST/DELETE /api/scene-assets` — nunca com Service/Repository/
- * Storage diretamente. Aceita dois caminhos para vincular um Asset:
- * abrir `SceneAssetPicker` (clique) ou soltar um card arrastado da
- * Biblioteca direto sobre o painel.
+ * Painel "📎 Assets" embutido em cada `SceneCard` (Sprint 2.0; rotas
+ * migradas para `/api/scenes/:sceneId/assets*` na Task "Scene Asset
+ * Binding"). Só fala com essas rotas HTTP — nunca com Service/
+ * Repository/Storage diretamente. Aceita dois caminhos para vincular um
+ * Asset: abrir `SceneAssetPicker` (clique) ou soltar um card arrastado
+ * da Biblioteca direto sobre o painel.
  */
 export default function SceneAssetsPanel({ sceneId, projectId }: SceneAssetsPanelProps) {
   const [sceneAssets, setSceneAssets] = useState<SceneAssetRecord[] | null>(null);
@@ -27,7 +28,7 @@ export default function SceneAssetsPanel({ sceneId, projectId }: SceneAssetsPane
   const [dropError, setDropError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    fetch(`/api/scene-assets?sceneId=${encodeURIComponent(sceneId)}`)
+    fetch(`/api/scenes/${encodeURIComponent(sceneId)}/assets`)
       .then((response) => {
         if (!response.ok) throw new Error("Não foi possível carregar os assets da cena.");
         return response.json();
@@ -42,10 +43,10 @@ export default function SceneAssetsPanel({ sceneId, projectId }: SceneAssetsPane
 
   const attach = useCallback(
     async (assetId: string, role: string) => {
-      const response = await fetch("/api/scene-assets", {
+      const response = await fetch(`/api/scenes/${encodeURIComponent(sceneId)}/assets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sceneId, assetId, role }),
+        body: JSON.stringify({ assetId, role }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
@@ -58,7 +59,9 @@ export default function SceneAssetsPanel({ sceneId, projectId }: SceneAssetsPane
 
   async function detach(sceneAsset: SceneAssetRecord) {
     setSceneAssets((prev) => prev?.filter((sa) => sa.id !== sceneAsset.id) ?? prev);
-    const response = await fetch(`/api/scene-assets/${sceneAsset.id}`, { method: "DELETE" });
+    const response = await fetch(`/api/scenes/${encodeURIComponent(sceneId)}/assets/${sceneAsset.id}`, {
+      method: "DELETE",
+    });
     if (!response.ok && response.status !== 404) {
       load();
     }
