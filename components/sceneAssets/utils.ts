@@ -53,6 +53,7 @@ export const SCENE_ASSET_ROLES = [
   "CHARACTER",
   "LOCATION",
   "PROP",
+  "STYLE",
   "OUTRO",
 ] as const;
 
@@ -72,6 +73,7 @@ const ROLE_LABEL: Record<string, string> = {
   CHARACTER: "Personagem",
   LOCATION: "Cenário",
   PROP: "Objeto de Cena",
+  STYLE: "Estilo",
   OUTRO: "Outro",
 };
 

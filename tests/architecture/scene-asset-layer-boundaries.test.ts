@@ -156,6 +156,17 @@ describe("Fronteiras de arquitetura do Asset Binding Engine", () => {
     expect(violations).toEqual([]);
   });
 
+  it("nenhum arquivo de lib/scene-assets/ (nem o contrato, nem a implementação Prisma) importa React ou Next.js — Repository não conhece UI", () => {
+    const files = listSourceFiles(join(ROOT, "lib", "scene-assets"));
+    const UI_NEEDLES = ["next/server", "next/navigation", "react"];
+
+    const violations = files
+      .map((file) => ({ file: toRepoPath(file), hit: importsAnyOf(readFileSync(file, "utf-8"), UI_NEEDLES) }))
+      .filter((entry) => entry.hit !== false);
+
+    expect(violations).toEqual([]);
+  });
+
   it("só lib/scene-assets/container.ts instancia PrismaSceneAssetRepository/SceneAssetService", () => {
     const allFiles = [
       ...listSourceFiles(join(ROOT, "lib")),

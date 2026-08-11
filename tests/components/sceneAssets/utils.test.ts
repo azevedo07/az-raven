@@ -15,14 +15,15 @@ describe("roleLabel", () => {
     expect(roleLabel("CHARACTER")).toBe("Personagem");
     expect(roleLabel("LOCATION")).toBe("Cenário");
     expect(roleLabel("PROP")).toBe("Objeto de Cena");
+    expect(roleLabel("STYLE")).toBe("Estilo");
   });
 
   it("retorna o próprio valor quando o papel não é reconhecido — vocabulário aberto, não fechado", () => {
     expect(roleLabel("ALGO_DESCONHECIDO")).toBe("ALGO_DESCONHECIDO");
   });
 
-  it("cobre os 16 papéis sugeridos (13 da Sprint 2.0 + CHARACTER/LOCATION/PROP da Task Scene Asset Binding)", () => {
-    expect(SCENE_ASSET_ROLES).toHaveLength(16);
+  it("cobre os 17 papéis sugeridos (13 da Sprint 2.0 + CHARACTER/LOCATION/PROP/STYLE das Tasks seguintes)", () => {
+    expect(SCENE_ASSET_ROLES).toHaveLength(17);
     for (const role of SCENE_ASSET_ROLES) {
       // "SFX" já é, coincidentemente, seu próprio rótulo em português.
       expect(roleLabel(role)).toBeTruthy();
