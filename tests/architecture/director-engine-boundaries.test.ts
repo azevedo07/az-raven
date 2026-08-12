@@ -5,21 +5,55 @@ import { join, relative } from "path";
 /**
  * Guarda automatizada da fronteira do Director Engine (Task "Director
  * Engine Foundation, parte 2"; Use Case de orquestração adicionado na
- * Task "Director Engine — Orquestração"):
+ * Task "Director Engine — Orquestração"; `CinematicIntent` adicionado
+ * na Task "Director Engine — Cinematic Intent"; `DirectorEngine.process`
+ * migrado de `DirectorContext` para `CinematicIntent` na Task "Director
+ * Engine — Integrar CinematicIntent ao processamento"; `CinematicDecision`
+ * adicionado e `DirectorEngine.process` migrado de `CinematicIntent`
+ * para `CinematicDecision` na Task "Director Engine — Primeira Camada
+ * de Decisão Cinematográfica Determinística"; `CinematicAnalysisReport`
+ * adicionado na Task "Director Engine — Relatório Cinematográfico
+ * Determinístico por Cena" — `directorEngine.ts` passa a importar
+ * também `createCinematicAnalysisReport` (./cinematicAnalysisReport.ts),
+ * função pura, não composta por `container.ts`, mesmo padrão de
+ * `cinematicIntent.ts`/`cinematicDecision.ts`. Substitui
+ * `CinematicAssessment` (Task anterior, nunca commitada) — mesmo
+ * conjunto de dados (classificação/contagem por categoria) mais o
+ * detalhamento por entrada e `missingFields`; manter os dois seria
+ * duplicar dados sem necessidade):
  *
- *   DirectorContext (lib/director-context/types.ts)
  *   SceneContextReader (lib/director-context/sceneContextReader.ts, porta pura)
- *         ↓ (únicas dependências permitidas do Use Case)
- *   ProcessSceneWithDirectorUseCase (lib/director-engine/use-cases/)
  *         ↓
- *   DirectorEngine (lib/director-engine/)
+ *   DirectorContext (lib/director-context/types.ts)
+ *         ↓
+ *   createCinematicIntent (lib/director-engine/cinematicIntent.ts)
+ *   — função pura. É o ÚNICO arquivo do módulo que ainda importa `DirectorContext`.
+ *         ↓
+ *   CinematicIntent (lib/director-engine/cinematicIntent.ts)
+ *         ↓
+ *   createCinematicDecision (lib/director-engine/cinematicDecision.ts)
+ *   — função pura, sem estado, NÃO composta por container.ts. É o
+ *   ÚNICO arquivo do módulo (fora de cinematicIntent.ts) que importa
+ *   `CinematicIntent`.
+ *         ↓
+ *   CinematicDecision (lib/director-engine/cinematicDecision.ts)
+ *         ↓ (única dependência de lib/director-engine/types.ts e directorEngine.ts)
+ *   DirectorEngine.process (lib/director-engine/)
+ *         ↓
+ *   DirectorEngineResult (inclui `decision`, eco do CinematicDecision recebido)
+ *
+ *   ProcessSceneWithDirectorUseCase (lib/director-engine/use-cases/)
+ *   orquestra a cadeia inteira: SceneContextReader (porta) ->
+ *   createCinematicIntent -> createCinematicDecision (funções puras,
+ *   importadas direto, nunca injetadas) -> DirectorEngine (porta).
  *
  * Nunca o inverso — `lib/director-context/` não pode depender de
- * `lib/director-engine/`. O Director Engine (incluindo o Use Case) não
- * conhece `Scene`, Repository, `AssetService`/`SceneAssetService`,
- * Prisma, Storage, Next.js, React ou Pipeline — e nunca importa
- * `SceneContextReaderImpl`/`lib/director-context/container.ts`
- * diretamente (só a porta `SceneContextReader`). Só
+ * `lib/director-engine/`. O Director Engine (`types.ts`/`directorEngine.ts`,
+ * incluindo o Use Case) não conhece `Scene`, `lib/data.ts`, Repository,
+ * `AssetService`/`SceneAssetService`, Prisma, Storage, Next.js, React
+ * ou Pipeline — e nunca importa `SceneContextReaderImpl`/
+ * `lib/director-context/container.ts` diretamente (só a porta
+ * `SceneContextReader`, e só dentro do Use Case). Só
  * `lib/director-engine/container.ts` (o Composition Root) tem licença
  * para importar implementações concretas e outros `container.ts`.
  *
@@ -84,6 +118,8 @@ const FORBIDDEN_NEEDLES = [
   "pipeline-service/",
   "repositories/",
   "application/",
+  "../data", // lib/data.ts, importado por caminho relativo de dentro de lib/director-engine/
+  "@/lib/data",
 ];
 
 /**
@@ -97,11 +133,14 @@ const FORBIDDEN_NEEDLES = [
 const SCENE_TYPE_NEEDLES = ["../types", "@/lib/types"];
 
 describe("Fronteiras de arquitetura do Director Engine", () => {
-  it("lib/director-engine/types.ts só importa DirectorContext (lib/director-context/types) — nenhuma outra dependência", () => {
+  it("lib/director-engine/types.ts só importa CinematicDecision (./cinematicDecision) e CinematicAnalysisReport (./cinematicAnalysisReport) — nunca CinematicIntent nem DirectorContext diretamente", () => {
     const file = join(ROOT, "lib", "director-engine", "types.ts");
     const content = readFileSync(file, "utf-8");
     const imports = importLines(content).map((line) => line.trim());
-    expect(imports).toEqual(['import { DirectorContext } from "../director-context/types";']);
+    expect(imports).toEqual([
+      'import { CinematicDecision } from "./cinematicDecision";',
+      'import { CinematicAnalysisReport } from "./cinematicAnalysisReport";',
+    ]);
   });
 
   it("nenhum arquivo de nível superior de lib/director-engine/ (fora de use-cases/) importa Scene (lib/types.ts)", () => {
@@ -152,12 +191,14 @@ describe("Fronteiras de arquitetura do Director Engine", () => {
     expect(violations).toEqual([]);
   });
 
-  it("lib/director-engine/use-cases/processSceneWithDirectorUseCase.ts importa só as duas portas necessárias (SceneContextReader e DirectorEngine/DirectorEngineResult)", () => {
+  it("lib/director-engine/use-cases/processSceneWithDirectorUseCase.ts importa só o necessário: a porta SceneContextReader, as funções puras createCinematicIntent/createCinematicDecision, e as portas DirectorEngine/DirectorEngineResult", () => {
     const file = join(ROOT, "lib", "director-engine", "use-cases", "processSceneWithDirectorUseCase.ts");
     const content = readFileSync(file, "utf-8");
     const imports = importLines(content).map((line) => line.trim());
     expect(imports).toEqual([
       'import { SceneContextReader } from "../../director-context/sceneContextReader";',
+      'import { createCinematicDecision } from "../cinematicDecision";',
+      'import { createCinematicIntent } from "../cinematicIntent";',
       'import { DirectorEngine, DirectorEngineResult } from "../types";',
     ]);
   });
@@ -257,13 +298,43 @@ describe("Fronteiras de arquitetura do Director Engine", () => {
     expect(violations).toEqual([]);
   });
 
-  it("lib/director-engine/directorEngine.ts (a implementação) também respeita a fronteira — mesma checagem, isolada", () => {
+  it("lib/director-engine/directorEngine.ts (a implementação) importa só CinematicDecision, createCinematicAnalysisReport e o próprio ./types — nunca CinematicIntent nem DirectorContext diretamente", () => {
     const file = join(ROOT, "lib", "director-engine", "directorEngine.ts");
     const content = readFileSync(file, "utf-8");
     const imports = importLines(content).map((line) => line.trim());
     expect(imports).toEqual([
-      'import { DirectorContext } from "../director-context/types";',
+      'import { CinematicDecision } from "./cinematicDecision";',
+      'import { createCinematicAnalysisReport } from "./cinematicAnalysisReport";',
       'import { DirectorEngine, DirectorEngineDiagnostic, DirectorEngineResult } from "./types";',
     ]);
+  });
+
+  it("lib/director-engine/cinematicAnalysisReport.ts só importa CinematicDecision, CinematicDecisionCategory e CinematicDecisionStatus (./cinematicDecision) — nenhuma outra dependência", () => {
+    const file = join(ROOT, "lib", "director-engine", "cinematicAnalysisReport.ts");
+    const content = readFileSync(file, "utf-8");
+    const imports = importLines(content).map((line) => line.trim());
+    expect(imports).toEqual(['import { CinematicDecision, CinematicDecisionCategory, CinematicDecisionStatus } from "./cinematicDecision";']);
+  });
+
+  it("lib/director-engine/cinematicIntent.ts só importa DirectorContext (lib/director-context/types) — nenhuma outra dependência", () => {
+    const file = join(ROOT, "lib", "director-engine", "cinematicIntent.ts");
+    const content = readFileSync(file, "utf-8");
+    const imports = importLines(content).map((line) => line.trim());
+    expect(imports).toEqual(['import { DirectorContext } from "../director-context/types";']);
+  });
+
+  it("lib/director-engine/cinematicDecision.ts só importa CinematicIntent (./cinematicIntent) — nunca DirectorContext, Scene, Repository, Service, Prisma, Storage, Pipeline, containers ou SceneContextReader diretamente", () => {
+    const file = join(ROOT, "lib", "director-engine", "cinematicDecision.ts");
+    const content = readFileSync(file, "utf-8");
+    const imports = importLines(content).map((line) => line.trim());
+    expect(imports).toEqual(['import { CinematicIntent } from "./cinematicIntent";']);
+  });
+
+  it("lib/director-engine/container.ts NÃO importa cinematicIntent.ts, cinematicDecision.ts nem cinematicAnalysisReport.ts — são funções puras, não compostas pelo Composition Root", () => {
+    const file = join(ROOT, "lib", "director-engine", "container.ts");
+    const content = readFileSync(file, "utf-8");
+    expect(importsAnyOf(content, ["cinematicIntent"])).toBe(false);
+    expect(importsAnyOf(content, ["cinematicDecision"])).toBe(false);
+    expect(importsAnyOf(content, ["cinematicAnalysisReport"])).toBe(false);
   });
 });

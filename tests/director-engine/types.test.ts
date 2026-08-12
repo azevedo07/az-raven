@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DirectorEngineDiagnostic, DirectorEngineResult } from "../../lib/director-engine/types";
+import { CinematicDecision } from "../../lib/director-engine/cinematicDecision";
 
 /**
  * Testes de contrato do `DirectorEngineResult`/`DirectorEngineDiagnostic`
@@ -27,6 +28,16 @@ describe("DirectorEngineResult — contrato", () => {
     expect(result.status).toBe("PROCESSED");
     expect(result.sceneId).toBe("1");
     expect(result.diagnostics).toEqual([]);
+  });
+
+  it("um resultado PROCESSED pode incluir a CinematicDecision ecoada em decision", () => {
+    const decision: CinematicDecision = {
+      sceneId: "1",
+      decisions: [{ category: "NARRATIVE", status: "AVAILABLE", value: "Objetivo real", source: "narrativeObjective" }],
+    };
+    const result = buildResult({ decision });
+
+    expect(result.decision).toEqual(decision);
   });
 
   it("um resultado INVALID_CONTEXT válido pode ser construído com diagnostics preenchido", () => {

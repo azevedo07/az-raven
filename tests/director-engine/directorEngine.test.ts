@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { DirectorEngineImpl } from "../../lib/director-engine/directorEngine";
 import { directorEngine } from "../../lib/director-engine/container";
+import { CinematicDecision, createCinematicDecision } from "../../lib/director-engine/cinematicDecision";
+import { CinematicIntent, createCinematicIntent } from "../../lib/director-engine/cinematicIntent";
 import { DirectorContext } from "../../lib/director-context/types";
 import { SceneContextReaderImpl } from "../../lib/director-context/sceneContextReaderImpl";
 import { SceneAssetService } from "../../lib/scene-assets/sceneAssetService";
@@ -16,176 +18,319 @@ import { Scene } from "../../lib/types";
 
 /**
  * Testes do `DirectorEngineImpl` (Task "Director Engine Foundation,
- * parte 2"). A classe é deliberadamente burra — nenhum teste aqui
- * verifica "inteligência" nenhuma, só a fronteira: aceita um
- * `DirectorContext`, preserva `sceneId`, não modifica a entrada, produz
- * um resultado serializável e determinístico (exceto `generatedAt`).
+ * parte 2"; contrato migrado de `DirectorContext` para `CinematicIntent`
+ * na Task "Director Engine — Integrar CinematicIntent ao processamento";
+ * migrado de `CinematicIntent` para `CinematicDecision` na Task
+ * "Director Engine — Primeira Camada de Decisão Cinematográfica
+ * Determinística"). A classe é deliberadamente burra — nenhum teste
+ * aqui verifica "inteligência" nenhuma, só a fronteira: aceita um
+ * `CinematicDecision` já pronto, preserva `sceneId`, ecoa a decisão no
+ * resultado, não modifica a entrada, produz um resultado serializável e
+ * determinístico (exceto `generatedAt`).
  */
 
-function buildContext(overrides: Partial<DirectorContext> = {}): DirectorContext {
+function buildIntent(overrides: Partial<CinematicIntent> = {}): CinematicIntent {
   return {
-    scene: { sceneId: "1", title: "Meia-noite tenebrosa", order: 1, status: "aprovado", duration: "45s" },
-    creativeBrief: { emotionalGoal: "Solidão contemplativa" },
-    assets: [],
-    generatedAt: "2026-01-01T12:00:00.000Z",
+    sceneId: "1",
+    narrativeObjective: "Estabelecer o luto e a fadiga do narrador",
+    emotionalObjective: "Solidão contemplativa",
+    visualIntent: { lighting: "Luz de vela, sombras longas", camera: "Plano fixo, leve zoom-in", palette: ["#0B0D10"] },
+    audioIntent: { sound: "Vento fraco, relógio ao longe" },
+    pacingIntent: { duration: "45s" },
+    constraints: { approvalCriteria: "Silêncio deve ser sentido antes de qualquer corte" },
     ...overrides,
   };
 }
 
-function buildAsset(overrides: Partial<DirectorContext["assets"][number]> = {}): DirectorContext["assets"][number] {
-  return {
-    sceneAssetId: "scene-asset-1",
-    assetId: "asset-1",
-    name: "referencia.png",
-    type: "image",
-    mimeType: "image/png",
-    extension: "png",
-    size: 1024,
-    status: "READY",
-    storageProvider: "LOCAL",
-    role: "REFERENCE_IMAGE",
-    order: 0,
-    metadata: null,
-    linkedAt: "2026-01-01T10:00:00.000Z",
-    updatedAt: "2026-01-01T10:00:00.000Z",
-    ...overrides,
-  };
+/** Constrói a decisão a partir de um Intent real (nunca à mão) — garante que a fixture sempre reflete o contrato de verdade. */
+function buildDecision(intentOverrides: Partial<CinematicIntent> = {}): CinematicDecision {
+  return createCinematicDecision(buildIntent(intentOverrides));
 }
 
 describe("DirectorEngineImpl — process", () => {
-  it("aceita um DirectorContext válido e retorna status PROCESSED", async () => {
+  it("aceita um CinematicDecision válido e retorna status PROCESSED", async () => {
     const engine = new DirectorEngineImpl();
 
-    const result = await engine.process(buildContext());
+    const result = await engine.process(buildDecision());
 
     expect(result.status).toBe("PROCESSED");
     expect(result.diagnostics).toEqual([]);
   });
 
-  it("retorna o sceneId correto, ecoado de context.scene.sceneId", async () => {
+  it("usa o sceneId da Decision, ecoado em result.sceneId", async () => {
     const engine = new DirectorEngineImpl();
 
-    const result = await engine.process(buildContext({ scene: { sceneId: "cena-42" } }));
+    const result = await engine.process(buildDecision({ sceneId: "cena-42" }));
 
     expect(result.sceneId).toBe("cena-42");
+  });
+
+  it("ecoa a CinematicDecision recebida em result.decision, sem transformação", async () => {
+    const engine = new DirectorEngineImpl();
+    const decision = buildDecision();
+
+    const result = await engine.process(decision);
+
+    expect(result.decision).toEqual(decision);
   });
 
   it("o resultado é serializável com JSON.stringify", async () => {
     const engine = new DirectorEngineImpl();
 
-    const result = await engine.process(buildContext({ assets: [buildAsset()] }));
+    const result = await engine.process(buildDecision());
 
     expect(() => JSON.stringify(result)).not.toThrow();
     expect(JSON.parse(JSON.stringify(result))).toEqual(result);
   });
 
-  it("não modifica o DirectorContext recebido", async () => {
+  it("não modifica a CinematicDecision recebida", async () => {
     const engine = new DirectorEngineImpl();
-    const context = buildContext({ assets: [buildAsset({ metadata: { nota: "closeup" } })] });
-    const snapshot = JSON.parse(JSON.stringify(context));
+    const decision = buildDecision();
+    const snapshot = JSON.parse(JSON.stringify(decision));
 
-    await engine.process(context);
+    await engine.process(decision);
 
-    expect(context).toEqual(snapshot);
+    expect(decision).toEqual(snapshot);
   });
 
-  it("processar duas vezes o mesmo contexto produz resultado determinístico (exceto generatedAt)", async () => {
+  it("é determinístico — processar duas vezes a mesma decision produz resultado equivalente (exceto generatedAt)", async () => {
     const engine = new DirectorEngineImpl();
-    const context = buildContext({ assets: [buildAsset()] });
+    const decision = buildDecision();
 
-    const first = await engine.process(context);
-    const second = await engine.process(context);
+    const first = await engine.process(decision);
+    const second = await engine.process(decision);
 
     expect(first.status).toBe(second.status);
     expect(first.sceneId).toBe(second.sceneId);
+    expect(first.decision).toEqual(second.decision);
     expect(first.diagnostics).toEqual(second.diagnostics);
     // generatedAt propositalmente não é comparado — é hora de processamento, não determinístico.
     expect(typeof first.generatedAt).toBe("string");
     expect(typeof second.generatedAt).toBe("string");
   });
 
-  it("um contexto com Assets preserva role/order/metadata sem mutação e sem perda de dados", async () => {
+  it("uma Decision derivada de um Intent mínimo (só sceneId) continua válida — todas as 8 categorias UNAVAILABLE, nenhuma inventada", async () => {
     const engine = new DirectorEngineImpl();
-    const assets = [
-      buildAsset({ sceneAssetId: "sa-1", role: "CHARACTER", order: 0, metadata: { nota: "plano geral" } }),
-      buildAsset({ sceneAssetId: "sa-2", role: "LOCATION", order: 1, metadata: null }),
-    ];
-    const context = buildContext({ assets });
+    const decision = createCinematicDecision({ sceneId: "1" });
 
-    const result = await engine.process(context);
+    const result = await engine.process(decision);
 
     expect(result.status).toBe("PROCESSED");
-    expect(context.assets).toEqual(assets);
-    expect(context.assets[0].role).toBe("CHARACTER");
-    expect(context.assets[0].metadata).toEqual({ nota: "plano geral" });
-    expect(context.assets[1].role).toBe("LOCATION");
+    expect(result.sceneId).toBe("1");
+    expect(result.decision?.decisions.every((d) => d.status === "UNAVAILABLE")).toBe(true);
+    expect(result.decision?.decisions.every((d) => d.value === undefined && d.source === undefined)).toBe(true);
   });
 
-  it("um contexto sem Assets (array vazio) continua válido", async () => {
+  it("uma Decision mínima não gera nenhum valor cinematográfico inventado no resultado (busca textual por termos genéricos)", async () => {
     const engine = new DirectorEngineImpl();
+    const decision = createCinematicDecision({ sceneId: "1" });
 
-    const result = await engine.process(buildContext({ assets: [] }));
+    const result = await engine.process(decision);
+    const serialized = JSON.stringify(result).toLowerCase();
 
-    expect(result.status).toBe("PROCESSED");
+    for (const invented of ["cinematic", "dramatic", "epic", "dynamic", "beautiful", "immersive", "lens", "focallength", "aperture", "cameraposition", "cameramovement", "lightintensity", "colortemperature", "depthoffield", "bpm", "transition", "prompt", "recommendation", "score", "ranking", "confidence"]) {
+      expect(serialized).not.toContain(invented);
+    }
   });
 
-  it("um contexto sem creativeBrief (campo opcional ausente) continua válido", async () => {
+  it("produz um CinematicAnalysisReport em result.analysisReport, com sceneId preservado", async () => {
     const engine = new DirectorEngineImpl();
-    const context = buildContext();
-    delete context.creativeBrief;
+    const decision = buildDecision({ sceneId: "cena-77" });
 
-    const result = await engine.process(context);
+    const result = await engine.process(decision);
 
-    expect(result.status).toBe("PROCESSED");
+    expect(result.analysisReport).toBeDefined();
+    expect(result.analysisReport?.sceneId).toBe("cena-77");
+  });
+
+  it("uma Decision totalmente preenchida produz analysisReport com summary de 8/8 DEFINED", async () => {
+    const engine = new DirectorEngineImpl();
+    const decision = buildDecision();
+
+    const result = await engine.process(decision);
+
+    expect(result.analysisReport?.summary.availableCount).toBe(8);
+    expect(result.analysisReport?.summary.unavailableCount).toBe(0);
+    expect(result.analysisReport?.summary.totalCategories).toBe(8);
+    expect(result.analysisReport?.missingFields).toEqual([]);
+    expect(result.analysisReport?.categories.every((c) => c.requirement === "DEFINED")).toBe(true);
+  });
+
+  it("uma Decision mínima (Intent só com sceneId) produz analysisReport com todas as categorias MISSING", async () => {
+    const engine = new DirectorEngineImpl();
+    const decision = createCinematicDecision({ sceneId: "1" });
+
+    const result = await engine.process(decision);
+
+    expect(result.analysisReport?.summary.availableCount).toBe(0);
+    expect(result.analysisReport?.summary.unavailableCount).toBe(8);
+    expect(result.analysisReport?.categories.every((c) => c.requirement === "MISSING")).toBe(true);
+    expect(result.analysisReport?.missingFields).toEqual([
+      "NARRATIVE", "EMOTIONAL", "CAMERA", "LIGHTING", "PALETTE", "AUDIO", "PACING", "CONSTRAINTS",
+    ]);
+  });
+
+  it("uma Decision parcial produz analysisReport com classificação, summary e missingFields corretos", async () => {
+    const engine = new DirectorEngineImpl();
+    const decision = buildDecision({ visualIntent: undefined, audioIntent: undefined });
+
+    const result = await engine.process(decision);
+
+    expect(result.analysisReport?.summary.availableCategories).toEqual(["NARRATIVE", "EMOTIONAL", "PACING", "CONSTRAINTS"]);
+    expect(result.analysisReport?.summary.unavailableCategories).toEqual(["CAMERA", "LIGHTING", "PALETTE", "AUDIO"]);
+    expect(result.analysisReport?.missingFields).toEqual(["CAMERA", "LIGHTING", "PALETTE", "AUDIO"]);
+    expect(result.analysisReport?.summary).toEqual({
+      availableCategories: ["NARRATIVE", "EMOTIONAL", "PACING", "CONSTRAINTS"],
+      unavailableCategories: ["CAMERA", "LIGHTING", "PALETTE", "AUDIO"],
+      totalCategories: 8,
+      availableCount: 4,
+      unavailableCount: 4,
+    });
+  });
+
+  it("o analysisReport preserva a mesma ordem de categorias que a CinematicDecision original", async () => {
+    const engine = new DirectorEngineImpl();
+    const decision = buildDecision();
+
+    const result = await engine.process(decision);
+
+    expect(result.analysisReport?.categories.map((c) => c.category)).toEqual(decision.decisions.map((d) => d.category));
+  });
+
+  it("o analysisReport ecoa value/source exatamente como estão na Decision, para cada categoria disponível", async () => {
+    const engine = new DirectorEngineImpl();
+    const decision = buildDecision();
+
+    const result = await engine.process(decision);
+
+    const byCategory = Object.fromEntries((result.analysisReport?.categories ?? []).map((c) => [c.category, c]));
+    expect(byCategory.CAMERA).toEqual({
+      category: "CAMERA",
+      status: "AVAILABLE",
+      value: "Plano fixo, leve zoom-in",
+      source: "visualIntent.camera",
+      requirement: "DEFINED",
+    });
+  });
+
+  it("o analysisReport não interpreta o conteúdo de value — só o status importa para a classificação e o requirement", async () => {
+    const engine = new DirectorEngineImpl();
+    const withScaryCamera = buildDecision({ visualIntent: { camera: "câmera trêmula e aterrorizante, close extremo" } });
+
+    const result = await engine.process(withScaryCamera);
+
+    expect(result.analysisReport?.summary.availableCategories).toContain("CAMERA");
+    const serialized = JSON.stringify(result.analysisReport).toLowerCase();
+    expect(serialized).toContain("trêmula"); // value é ecoado, não removido — só não influencia a classificação
+    expect(serialized).not.toContain("close-up"); // nada é inferido a partir do texto original
+  });
+
+  it("o analysisReport não cria nenhum parâmetro técnico ou recomendação — só as chaves do contrato", async () => {
+    const engine = new DirectorEngineImpl();
+
+    const result = await engine.process(buildDecision());
+
+    expect(Object.keys(result.analysisReport ?? {}).sort()).toEqual(["categories", "missingFields", "sceneId", "summary"].sort());
+    expect(Object.keys(result.analysisReport?.summary ?? {}).sort()).toEqual(
+      ["availableCategories", "availableCount", "totalCategories", "unavailableCategories", "unavailableCount"].sort()
+    );
+    for (const entry of result.analysisReport?.categories ?? []) {
+      expect(Object.keys(entry).sort()).toEqual(["category", "requirement", "source", "status", "value"].sort());
+    }
+  });
+
+  it("o analysisReport é determinístico — mesma decision produz o mesmo analysisReport em duas chamadas", async () => {
+    const engine = new DirectorEngineImpl();
+    const decision = buildDecision();
+
+    const first = await engine.process(decision);
+    const second = await engine.process(decision);
+
+    expect(first.analysisReport).toEqual(second.analysisReport);
+  });
+
+  it("processar não modifica a CinematicDecision original, mesmo produzindo o analysisReport", async () => {
+    const engine = new DirectorEngineImpl();
+    const decision = buildDecision();
+    const snapshot = JSON.parse(JSON.stringify(decision));
+
+    await engine.process(decision);
+
+    expect(decision).toEqual(snapshot);
+  });
+
+  it("o resultado com analysisReport continua serializável com JSON.stringify", async () => {
+    const engine = new DirectorEngineImpl();
+
+    const result = await engine.process(buildDecision());
+
+    expect(() => JSON.stringify(result)).not.toThrow();
+    expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+  });
+
+  it("um CinematicDecision inválido (INVALID_CONTEXT) não produz analysisReport", async () => {
+    const engine = new DirectorEngineImpl();
+
+    const result = await engine.process(buildDecision({ sceneId: "" }));
+
+    expect(result.status).toBe("INVALID_CONTEXT");
+    expect(result.analysisReport).toBeUndefined();
   });
 
   it("trata explicitamente (sem lançar) um sceneId ausente/vazio, retornando INVALID_CONTEXT com diagnóstico", async () => {
     const engine = new DirectorEngineImpl();
 
-    const result = await engine.process(buildContext({ scene: { sceneId: "" } }));
+    const result = await engine.process(buildDecision({ sceneId: "" }));
 
     expect(result.status).toBe("INVALID_CONTEXT");
+    expect(result.decision).toBeUndefined();
     expect(result.diagnostics).toEqual([
-      { code: "MISSING_SCENE_ID", message: 'DirectorContext.scene.sceneId é obrigatório e deve ser uma string não vazia.' },
+      { code: "MISSING_SCENE_ID", message: "CinematicDecision.sceneId é obrigatório e deve ser uma string não vazia." },
     ]);
   });
 
-  it("trata explicitamente (sem lançar) assets que não é um array", async () => {
+  it("trata explicitamente (sem lançar) decisions que não é um array", async () => {
     const engine = new DirectorEngineImpl();
-    const context = { ...buildContext(), assets: "não é um array" } as unknown as DirectorContext;
+    const malformed = { ...buildDecision(), decisions: "não é um array" } as unknown as CinematicDecision;
 
-    const result = await engine.process(context);
+    const result = await engine.process(malformed);
 
     expect(result.status).toBe("INVALID_CONTEXT");
-    expect(result.diagnostics.some((d) => d.code === "INVALID_ASSETS")).toBe(true);
+    expect(result.diagnostics.some((d) => d.code === "INVALID_DECISIONS")).toBe(true);
   });
 
-  it("trata explicitamente (sem lançar) um context completamente ausente", async () => {
+  it("trata explicitamente (sem lançar) uma decision completamente ausente", async () => {
     const engine = new DirectorEngineImpl();
 
-    const result = await engine.process(undefined as unknown as DirectorContext);
+    const result = await engine.process(undefined as unknown as CinematicDecision);
 
     expect(result.status).toBe("INVALID_CONTEXT");
     expect(result.sceneId).toBe("");
-    expect(result.diagnostics).toEqual([{ code: "MISSING_CONTEXT", message: "DirectorContext não foi informado." }]);
+    expect(result.diagnostics).toEqual([{ code: "MISSING_DECISION", message: "CinematicDecision não foi informado." }]);
+  });
+
+  it("não acessa infraestrutura — DirectorEngineImpl não recebe nenhuma dependência no construtor", () => {
+    expect(() => new DirectorEngineImpl()).not.toThrow();
   });
 });
 
 describe("lib/director-engine/container.ts — Composition Root real", () => {
-  it("directorEngine (a instância composta pelo container) processa um DirectorContext de verdade", async () => {
-    const context = buildContext({ assets: [buildAsset()] });
+  it("directorEngine (a instância composta pelo container) processa um CinematicDecision de verdade", async () => {
+    const decision = buildDecision();
 
-    const result = await directorEngine.process(context);
+    const result = await directorEngine.process(decision);
 
     expect(result.status).toBe("PROCESSED");
-    expect(result.sceneId).toBe(context.scene.sceneId);
+    expect(result.sceneId).toBe(decision.sceneId);
     expect(() => JSON.stringify(result)).not.toThrow();
   });
 });
 
 /**
  * Integração em memória: Scene (fakes) -> SceneContextReaderImpl ->
- * DirectorContext -> DirectorEngineImpl.process(). Mesmos fakes de
+ * DirectorContext -> createCinematicIntent -> CinematicIntent ->
+ * createCinematicDecision -> CinematicDecision ->
+ * DirectorEngineImpl.process(). Mesmos fakes de
  * `tests/director-context/sceneContextReaderImpl.test.ts` — prova a
  * fronteira ponta a ponta, sem Postgres, sem HTTP, sem UI.
  */
@@ -326,8 +471,8 @@ function buildScene(overrides: Partial<Scene> = {}): Scene {
   };
 }
 
-describe("Integração — Scene -> SceneContextReader -> DirectorContext -> DirectorEngine", () => {
-  it("constrói um DirectorContext real a partir de fakes, processa com DirectorEngineImpl, e preserva sceneId/serialização/imutabilidade", async () => {
+describe("Integração — Scene -> SceneContextReader -> DirectorContext -> createCinematicIntent -> CinematicIntent -> createCinematicDecision -> CinematicDecision -> DirectorEngine", () => {
+  it("constrói um DirectorContext real a partir de fakes, transforma em CinematicIntent e depois CinematicDecision (funções reais, sem mock), processa com DirectorEngineImpl, e preserva sceneId/serialização/imutabilidade em cada etapa", async () => {
     const assetService = new AssetService(new FakeAssetRepository(), new FakeStorageAdapter());
     const sceneAssetService = new SceneAssetService(new FakeSceneAssetRepository(), assetService);
     const reader = new SceneContextReaderImpl(sceneAssetService, [buildScene()]);
@@ -347,11 +492,44 @@ describe("Integração — Scene -> SceneContextReader -> DirectorContext -> Dir
     const context = await reader.getDirectorContext("1");
     const contextSnapshot = JSON.parse(JSON.stringify(context));
 
-    const result = await engine.process(context);
+    const intent = createCinematicIntent(context);
+    const intentSnapshot = JSON.parse(JSON.stringify(intent));
+
+    const decision = createCinematicDecision(intent);
+    // A decisão preserva os dados reais da Scene, categoria por categoria — nada inventado.
+    expect(decision).toEqual({
+      sceneId: "1",
+      decisions: [
+        { category: "NARRATIVE", status: "AVAILABLE", value: "Estabelecer o luto e a fadiga do narrador", source: "narrativeObjective" },
+        { category: "EMOTIONAL", status: "AVAILABLE", value: "Solidão contemplativa", source: "emotionalObjective" },
+        { category: "CAMERA", status: "AVAILABLE", value: "Plano fixo, leve zoom-in", source: "visualIntent.camera" },
+        { category: "LIGHTING", status: "AVAILABLE", value: "Luz de vela, sombras longas", source: "visualIntent.lighting" },
+        { category: "PALETTE", status: "AVAILABLE", value: ["#0B0D10", "#3a2a12", "#1a1420"], source: "visualIntent.palette" },
+        { category: "AUDIO", status: "AVAILABLE", value: "Vento fraco, relógio ao longe", source: "audioIntent.sound" },
+        { category: "PACING", status: "AVAILABLE", value: "45s", source: "pacingIntent.duration" },
+        { category: "CONSTRAINTS", status: "AVAILABLE", value: "Silêncio deve ser sentido antes de qualquer corte", source: "constraints.approvalCriteria" },
+      ],
+    });
+    expect(context).toEqual(contextSnapshot); // createCinematicIntent não modificou o context.
+    expect(intent).toEqual(intentSnapshot); // createCinematicDecision não modificou o intent.
+
+    const result = await engine.process(decision);
 
     expect(result.status).toBe("PROCESSED");
     expect(result.sceneId).toBe("1");
+    expect(result.decision).toEqual(decision);
+    expect(result.analysisReport?.sceneId).toBe("1");
+    expect(result.analysisReport?.summary).toEqual({
+      availableCategories: ["NARRATIVE", "EMOTIONAL", "CAMERA", "LIGHTING", "PALETTE", "AUDIO", "PACING", "CONSTRAINTS"],
+      unavailableCategories: [],
+      totalCategories: 8,
+      availableCount: 8,
+      unavailableCount: 0,
+    });
+    expect(result.analysisReport?.missingFields).toEqual([]);
+    expect(result.analysisReport?.categories).toEqual(
+      decision.decisions.map((d) => ({ ...d, requirement: "DEFINED" }))
+    );
     expect(() => JSON.stringify(result)).not.toThrow();
-    expect(context).toEqual(contextSnapshot);
   });
 });

@@ -1,20 +1,32 @@
 import { SceneContextReader } from "../../director-context/sceneContextReader";
+import { createCinematicDecision } from "../cinematicDecision";
+import { createCinematicIntent } from "../cinematicIntent";
 import { DirectorEngine, DirectorEngineResult } from "../types";
 
 /**
- * Use Case de orquestração (Task "Director Engine — Orquestração").
- * Prova a sequência:
+ * Use Case de orquestração (Task "Director Engine — Orquestração";
+ * `createCinematicIntent` integrado na Task "Director Engine —
+ * Integrar CinematicIntent ao processamento"; `createCinematicDecision`
+ * integrado na Task "Director Engine — Primeira Camada de Decisão
+ * Cinematográfica Determinística"). Prova a sequência:
  *
- *   sceneId -> SceneContextReader -> DirectorContext -> DirectorEngine.process() -> DirectorEngineResult
+ *   sceneId -> SceneContextReader -> DirectorContext -> createCinematicIntent -> CinematicIntent -> createCinematicDecision -> CinematicDecision -> DirectorEngine.process() -> DirectorEngineResult
  *
- * Nenhuma regra de negócio própria — só repassa a chamada, exatamente
- * como todo Use Case já existente no projeto (`lib/assets/use-cases/`,
+ * Nenhuma regra de negócio própria — só repassa a chamada e aplica as
+ * duas transformações puras (`createCinematicIntent`,
+ * `createCinematicDecision`) no meio do caminho, exatamente como todo
+ * Use Case já existente no projeto (`lib/assets/use-cases/`,
  * `lib/scene-assets/use-cases/`). Depende só de `SceneContextReader` e
  * `DirectorEngine` — as duas portas puras, nunca das implementações
  * concretas (`SceneContextReaderImpl`/`DirectorEngineImpl`), nunca de
- * `SceneAssetService`/`AssetService`/Prisma/Storage diretamente. Quem
- * decide QUAL implementação injetar é `lib/director-engine/container.ts`
- * — este arquivo não instancia nada.
+ * `SceneAssetService`/`AssetService`/Prisma/Storage diretamente. Nem
+ * `createCinematicIntent` nem `createCinematicDecision` são injetadas —
+ * são funções puras sem estado, importadas diretamente (mesmo princípio
+ * de qualquer função utilitária pura no projeto: só classes/serviços
+ * com uma implementação a trocar entram via injeção de dependência).
+ * Quem decide QUAL implementação de `SceneContextReader`/`DirectorEngine`
+ * injetar é `lib/director-engine/container.ts` — este arquivo não
+ * instancia nada.
  */
 
 export interface ProcessSceneWithDirectorInput {
@@ -39,6 +51,8 @@ export class ProcessSceneWithDirectorUseCaseImpl implements ProcessSceneWithDire
 
   async execute({ sceneId }: ProcessSceneWithDirectorInput): Promise<DirectorEngineResult> {
     const context = await this.contextReader.getDirectorContext(sceneId);
-    return this.directorEngine.process(context);
+    const intent = createCinematicIntent(context);
+    const decision = createCinematicDecision(intent);
+    return this.directorEngine.process(decision);
   }
 }

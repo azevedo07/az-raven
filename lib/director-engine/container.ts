@@ -20,10 +20,18 @@ import { ProcessSceneWithDirectorUseCaseImpl } from "./use-cases/processSceneWit
  *
  * `directorEngine` não recebe nenhuma dependência composta de outro
  * módulo — `DirectorEngineImpl` não depende de nada além do contrato
- * `DirectorContext`. `processSceneWithDirectorUseCase` consome
+ * `CinematicDecision` (que por sua vez só depende de `CinematicIntent`,
+ * que só depende de `DirectorContext` — ver `cinematicDecision.ts`/
+ * `cinematicIntent.ts`). `processSceneWithDirectorUseCase` consome
  * `sceneContextReader`, já composto por `lib/director-context/container.ts`
  * (que por sua vez já consome `sceneAssetService`) — nenhuma lógica de
  * negócio é reimplementada, nenhum Repository/Service novo é criado.
+ * Nem `createCinematicIntent` (transformação `DirectorContext ->
+ * CinematicIntent`) nem `createCinematicDecision` (transformação
+ * `CinematicIntent -> CinematicDecision`) são compostas aqui — são
+ * funções puras sem estado, chamadas diretamente pelo Use Case (ver
+ * `use-cases/processSceneWithDirectorUseCase.ts`), não implementações
+ * que precisem ser injetadas/trocadas.
  *
  *   sceneContextReader (lib/director-context) -\
  *                                                +-> ProcessSceneWithDirectorUseCaseImpl

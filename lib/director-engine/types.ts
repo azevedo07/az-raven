@@ -1,35 +1,53 @@
-import { DirectorContext } from "../director-context/types";
+import { CinematicDecision } from "./cinematicDecision";
+import { CinematicAnalysisReport } from "./cinematicAnalysisReport";
 
 /**
  * Director Engine — contratos (Task "Director Engine Foundation, parte
- * 2"). Esta Task cria SOMENTE a fronteira arquitetural: `DirectorEngine`
- * aceita um `DirectorContext` já pronto e devolve um resultado mínimo,
- * determinístico, sem nenhuma decisão cinematográfica.
+ * 2"; `DirectorEngine.process` migrado de `DirectorContext` para
+ * `CinematicIntent` na Task "Director Engine — Integrar CinematicIntent
+ * ao processamento"; migrado de `CinematicIntent` para `CinematicDecision`
+ * na Task "Director Engine — Primeira Camada de Decisão Cinematográfica
+ * Determinística"; `analysisReport` adicionado na Task "Director Engine —
+ * Relatório Cinematográfico Determinístico por Cena", a primeira vez
+ * que o Engine produz algo além de um eco — mas ainda só classificação/
+ * contagem/explicação estrutural, nenhuma decisão cinematográfica
+ * real).
  *
  * Direção de dependência permitida (e única):
  *
- *   director-engine -> DirectorContext (lib/director-context/types.ts)
+ *   director-engine -> CinematicAnalysisReport (lib/director-engine/cinematicAnalysisReport.ts)
+ *                    -> CinematicDecision (lib/director-engine/cinematicDecision.ts)
+ *                    -> CinematicIntent (lib/director-engine/cinematicIntent.ts)
+ *                    -> DirectorContext (lib/director-context/types.ts)
  *
- * Nunca o inverso. Este arquivo não importa `Scene`, nenhum Repository,
- * nenhum Service, Prisma, Storage, Next.js ou React — só o contrato
- * puro de `lib/director-context/types.ts`.
+ * Nunca o inverso. Este arquivo não importa `CinematicIntent` nem
+ * `DirectorContext` diretamente — só `CinematicDecision` (parâmetro de
+ * `process`, e ecoado em `DirectorEngineResult.decision`) e
+ * `CinematicAnalysisReport` (o novo resultado derivado). Não importa
+ * `Scene`, nenhum Repository, nenhum Service, Prisma, Storage, Next.js
+ * ou React.
  *
- * `DirectorEngineResult` é deliberadamente mínimo — nenhum campo
- * cinematográfico (câmera, iluminação, ritmo, emoção derivada) foi
- * adicionado. Quando uma decisão real de direção existir num Director
- * Engine futuro, ela pertence a uma Task futura, não a esta.
+ * `DirectorEngineResult` continua mínimo — `analysisReport` é só
+ * classificação/contagem/explicação mecânica do `CinematicDecision`
+ * recebido (nenhuma informação nova, nenhuma interpretação semântica),
+ * nenhum campo cinematográfico real (câmera, iluminação, ritmo,
+ * recomendação) foi inventado. Quando o Director Engine passar a tomar
+ * decisões cinematográficas de verdade, isso pertence a uma Task
+ * futura.
  */
 
 /**
- * `PROCESSED`: o `DirectorContext` tinha a estrutura mínima exigida e
- * foi aceito. `INVALID_CONTEXT`: o `DirectorContext` (ou algo dentro
+ * `PROCESSED`: o `CinematicDecision` tinha a estrutura mínima exigida e
+ * foi aceito. `INVALID_CONTEXT`: o `CinematicDecision` (ou algo dentro
  * dele) não tinha a estrutura mínima — ver `diagnostics` para o motivo.
- * Nenhum dos dois estados representa uma decisão cinematográfica; é só
- * validação estrutural.
+ * Nenhum dos dois estados representa uma decisão cinematográfica nova;
+ * é só validação estrutural. (Nome mantido de Tasks anteriores por
+ * compatibilidade — "context" aqui significa "o que foi processado",
+ * não o tipo `DirectorContext` especificamente.)
  */
 export type DirectorEngineStatus = "PROCESSED" | "INVALID_CONTEXT";
 
-/** Uma constatação estrutural sobre o `DirectorContext` recebido — nunca sobre o conteúdo criativo dele. */
+/** Uma constatação estrutural sobre o `CinematicDecision` recebido — nunca sobre o conteúdo criativo dele. */
 export interface DirectorEngineDiagnostic {
   code: string;
   message: string;
@@ -38,14 +56,18 @@ export interface DirectorEngineDiagnostic {
 /**
  * O resultado de `DirectorEngine.process` — puro, serializável
  * (`JSON.stringify` sempre seguro), sem nenhuma dependência de
- * infraestrutura. Mesmo princípio de `DirectorContext`: nenhuma classe,
- * nenhum `Date`, nenhum objeto de infraestrutura.
+ * infraestrutura. Mesmo princípio de `CinematicDecision`: nenhuma
+ * classe, nenhum `Date`, nenhum objeto de infraestrutura.
  */
 export interface DirectorEngineResult {
   status: DirectorEngineStatus;
-  /** Ecoa `context.scene.sceneId` — string vazia só quando o próprio `context`/`context.scene` está ausente (ver `diagnostics` nesse caso). */
+  /** Ecoa `decision.sceneId` — string vazia só quando o próprio `decision` está ausente (ver `diagnostics` nesse caso). */
   sceneId: string;
-  /** ISO 8601 — hora em que este resultado foi produzido (não é `generatedAt` do `DirectorContext` de entrada). */
+  /** Eco do `CinematicDecision` recebido — ausente quando `status` é `"INVALID_CONTEXT"` (não há decisão válida para ecoar). Nenhuma transformação: exatamente o que `process` recebeu. */
+  decision?: CinematicDecision;
+  /** Relatório de análise estrutural derivado de `decision` (`createCinematicAnalysisReport`) — ausente quando `status` é `"INVALID_CONTEXT"`, pelo mesmo motivo de `decision`. */
+  analysisReport?: CinematicAnalysisReport;
+  /** ISO 8601 — hora em que este resultado foi produzido (não é nenhum `generatedAt` de uma camada anterior). */
   generatedAt: string;
   /** Vazio quando `status` é `"PROCESSED"`. */
   diagnostics: DirectorEngineDiagnostic[];
@@ -59,14 +81,15 @@ export interface DirectorEngineResult {
  */
 export interface DirectorEngine {
   /**
-   * Aceita um `DirectorContext` já pronto (produzido por
-   * `SceneContextReader.getDirectorContext`, em outra camada — este
-   * método nunca busca ou constrói o contexto sozinho) e devolve um
-   * `DirectorEngineResult`. Não modifica `context`. Não lança para um
-   * `DirectorContext` estruturalmente inválido — devolve
-   * `status: "INVALID_CONTEXT"` com o(s) motivo(s) em `diagnostics`,
-   * nunca uma exceção (mesmo tratamento explícito, testável por valor
-   * de retorno, não por `try/catch`).
+   * Aceita um `CinematicDecision` já pronto (produzido por
+   * `createCinematicDecision`, a partir de um `CinematicIntent`, em
+   * outra camada — este método nunca busca/constrói o contexto, o
+   * intent ou a decisão sozinho) e devolve um `DirectorEngineResult`.
+   * Não modifica `decision`. Não lança para um `CinematicDecision`
+   * estruturalmente inválido — devolve `status: "INVALID_CONTEXT"` com
+   * o(s) motivo(s) em `diagnostics`, nunca uma exceção (mesmo
+   * tratamento explícito, testável por valor de retorno, não por
+   * `try/catch`).
    */
-  process(context: DirectorContext): Promise<DirectorEngineResult>;
+  process(decision: CinematicDecision): Promise<DirectorEngineResult>;
 }
